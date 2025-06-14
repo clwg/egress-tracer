@@ -33,24 +33,35 @@ type ConnectionData struct {
 }
 
 type Model struct {
-	table       table.Model
-	connections map[string]*ConnectionData
-	sortBy      sortColumn
-	sortDesc    bool
-	totalEvents int
-	startTime   time.Time
-	selectedRow int
-	width       int
-	height      int
-	showPopup   bool
-	popupData   *ConnectionData
+	table          table.Model
+	connections    map[string]*ConnectionData
+	sortBy         sortColumn
+	sortDesc       bool
+	totalEvents    int
+	startTime      time.Time
+	selectedRow    int
+	width          int
+	height         int
+	showPopup      bool
+	popupData      *ConnectionData
+	cacheMaxSize   int
+	cacheTTL       time.Duration
+	lastCleanup    time.Time
 }
 
 type EventMsg struct {
 	Event *types.Event
 }
 
-func NewModel() Model {
+type tickMsg time.Time
+
+func tickCmd() tea.Cmd {
+	return tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
+		return tickMsg(t)
+	})
+}
+
+func NewModel(cacheMaxSize int, cacheTTL time.Duration) Model {
 	// Initialize with default column headers (will be updated dynamically)
 	columns := []table.Column{
 		{Title: "Process", Width: 19},
@@ -82,11 +93,14 @@ func NewModel() Model {
 	t.SetStyles(s)
 
 	m := Model{
-		table:       t,
-		connections: make(map[string]*ConnectionData),
-		sortBy:      sortByLastSeen,
-		sortDesc:    true,
-		startTime:   time.Now(),
+		table:        t,
+		connections:  make(map[string]*ConnectionData),
+		sortBy:       sortByLastSeen,
+		sortDesc:     true,
+		startTime:    time.Now(),
+		cacheMaxSize: cacheMaxSize,
+		cacheTTL:     cacheTTL,
+		lastCleanup:  time.Now(),
 	}
 
 	// Set initial column headers with sort indicators
@@ -96,7 +110,7 @@ func NewModel() Model {
 }
 
 func (m Model) Init() tea.Cmd {
-	return nil
+	return tickCmd() // Start the cleanup timer
 }
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -114,6 +128,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.addEvent(msg.Event)
 		m.updateTable()
 		return m, nil
+
+	case tickMsg:
+		// Periodic cleanup independent of new events
+		entriesRemoved := m.evictExpiredEntries(time.Now())
+		if entriesRemoved > 0 {
+			m.updateTable()
+		}
+		return m, tickCmd() // Schedule next tick
 
 	case tea.KeyMsg:
 		switch msg.String() {
@@ -226,7 +248,7 @@ func (m *Model) View() string {
 
 	uptime := time.Since(m.startTime).Round(time.Second)
 	header := headerStyle.Render("Egress Tracer") +
-		statsStyle.Render(fmt.Sprintf("Uptime: %v | Total Events: %d | Unique Connections: %d",
+		statsStyle.Render(fmt.Sprintf("Uptime: %v | Total Events: %d | Current Records: %d",
 			uptime, m.totalEvents, len(m.connections)))
 
 	b.WriteString(header + "\n\n")
@@ -263,6 +285,9 @@ func (m *Model) addEvent(event *types.Event) {
 		}
 	}
 	m.totalEvents++
+
+	// Perform cache cleanup if needed
+	m.evictCacheIfNeeded()
 }
 
 func (m *Model) updateTable() {
@@ -466,5 +491,59 @@ func (m *Model) renderPopup() string {
 func SendEvent(event *types.Event) tea.Cmd {
 	return func() tea.Msg {
 		return EventMsg{Event: event}
+	}
+}
+
+// evictCacheIfNeeded performs size-based cache eviction (time-based is handled by timer)
+func (m *Model) evictCacheIfNeeded() {
+	// Size-based cleanup (run immediately if over limit)
+	if len(m.connections) > m.cacheMaxSize {
+		m.evictOldestEntries()
+	}
+}
+
+// evictExpiredEntries removes connections that have exceeded the TTL
+func (m *Model) evictExpiredEntries(now time.Time) int {
+	keysToDelete := make([]string, 0)
+	
+	for key, conn := range m.connections {
+		if now.Sub(conn.LastSeen) > m.cacheTTL {
+			keysToDelete = append(keysToDelete, key)
+		}
+	}
+	
+	for _, key := range keysToDelete {
+		delete(m.connections, key)
+	}
+	
+	return len(keysToDelete)
+}
+
+// evictOldestEntries removes the oldest entries to stay within size limit
+func (m *Model) evictOldestEntries() {
+	if len(m.connections) <= m.cacheMaxSize {
+		return
+	}
+	
+	// Create a slice of connections with their keys for sorting
+	type connectionWithKey struct {
+		key  string
+		conn *ConnectionData
+	}
+	
+	connections := make([]connectionWithKey, 0, len(m.connections))
+	for key, conn := range m.connections {
+		connections = append(connections, connectionWithKey{key: key, conn: conn})
+	}
+	
+	// Sort by LastSeen (oldest first)
+	sort.Slice(connections, func(i, j int) bool {
+		return connections[i].conn.LastSeen.Before(connections[j].conn.LastSeen)
+	})
+	
+	// Remove the oldest entries until we're within the size limit
+	entriesToRemove := len(connections) - m.cacheMaxSize
+	for i := 0; i < entriesToRemove; i++ {
+		delete(m.connections, connections[i].key)
 	}
 }
