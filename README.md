@@ -2,6 +2,21 @@
 
 A lightweight eBPF-based network connection tracer that monitors outbound TCP and UDP connections in real-time with process context and caching.
 
+
+### Quickstart (Ubuntu 24.04)
+
+Install required dependencies:
+
+```bash
+sudo apt install -y \
+  make \
+  golang \
+  llvm \
+  clang \
+  linux-headers-$(uname -r) \
+  libbpf-dev
+```
+
 ## Build
 
 ```bash
