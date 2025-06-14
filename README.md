@@ -32,9 +32,7 @@ sudo ./egress-tracer --log-file=/var/log/egress-tracer.jsonl \
 
 ```
 
-
 ## Project Structure
-
 
 ```
 .
@@ -56,6 +54,8 @@ sudo ./egress-tracer --log-file=/var/log/egress-tracer.jsonl \
     │   └── rotating.go        # Rotating log file implementation with size-based rotation
     ├── output/                 # Event formatting and output
     │   └── output.go          # Connection event formatting (JSON/text/JSONL)
+    ├── tui/                    # Terminal User Interface
+    │   └── model.go           # Interactive TUI with real-time connection monitoring
     └── types/                  # Shared data structures
         └── types.go           # Common types and connection event definitions
 ```
@@ -75,6 +75,8 @@ sudo ./egress-tracer --log-file=/var/log/egress-tracer.jsonl \
 - **`pkg/logger/rotating.go`**: Rotating JSON Lines logger with configurable file size limits and rotation policies, providing persistent structured logging for connection events.
 
 - **`pkg/output/output.go`**: Event formatting and output handling, supporting human-readable text, JSON, and rotating JSONL output formats for connection events.
+
+- **`pkg/tui/model.go`**: Terminal User Interface implementation using Bubble Tea framework, providing interactive real-time connection monitoring with sortable columns, connection grouping, cache management, and detailed popup views.
 
 - **`pkg/types/types.go`**: Shared data structures and type definitions used across packages, including connection event types and configuration options.
 
