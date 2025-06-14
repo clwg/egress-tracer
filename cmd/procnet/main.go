@@ -32,6 +32,10 @@ func main() {
 	cacheTTL := flag.Duration("cache-ttl", 5*time.Minute, "Process cache TTL duration")
 	cacheMaxSize := flag.Int("cache-max-size", 1000, "Maximum number of entries in process cache")
 
+	// TUI cache options
+	tuiCacheMaxSize := flag.Int("tui-cache-max-size", 1000, "Maximum number of TUI connection entries before eviction")
+	tuiCacheTTL := flag.Duration("tui-cache-ttl", 10*time.Minute, "TUI connection cache TTL duration")
+
 	// Rotating log options
 	logFile := flag.String("log-file", "", "Path to rotating log file (enables JSONL logging to file)")
 	logMaxSize := flag.Int64("log-max-size", 100*1024*1024, "Maximum size of log file before rotation (bytes)")
@@ -40,7 +44,7 @@ func main() {
 	flag.Parse()
 
 	if *tuiMode {
-		runTUI(*cacheTTL, *cacheMaxSize)
+		runTUI(*cacheTTL, *cacheMaxSize, *tuiCacheMaxSize, *tuiCacheTTL)
 		return
 	}
 
@@ -121,7 +125,7 @@ func main() {
 	}
 }
 
-func runTUI(cacheTTL time.Duration, cacheMaxSize int) {
+func runTUI(cacheTTL time.Duration, cacheMaxSize int, tuiCacheMaxSize int, tuiCacheTTL time.Duration) {
 	// Initialize process cache with LRU and TTL
 	processCache := cache.NewProcessCache(cacheTTL, cacheMaxSize)
 
@@ -133,7 +137,7 @@ func runTUI(cacheTTL time.Duration, cacheMaxSize int) {
 	defer tracer.Close()
 
 	// Initialize TUI model
-	model := tui.NewModel()
+	model := tui.NewModel(tuiCacheMaxSize, tuiCacheTTL)
 
 	// Create context for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
