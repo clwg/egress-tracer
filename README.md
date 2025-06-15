@@ -38,6 +38,9 @@ sudo ./egress-tracer --json                    # JSON output
 sudo ./egress-tracer --cache-ttl=10m           # PID Cache TTL
 sudo ./egress-tracer --cache-max-size=500      # PID Cache size
 
+# Whitelist filtering (suppress output for specific processes)
+sudo ./egress-tracer --whitelist=whitelist.txt # Load SHA256 whitelist from file
+
 # Rotating JSONL Logging
 sudo ./egress-tracer --log-file=/var/log/egress-tracer.jsonl          # Enable rotating JSONL logging
 sudo ./egress-tracer --log-file=/var/log/egress-tracer.jsonl \
@@ -45,6 +48,51 @@ sudo ./egress-tracer --log-file=/var/log/egress-tracer.jsonl \
                     --log-max-files=10                         # Max number of rotated files
 
 
+```
+
+## Whitelist Filtering
+
+The whitelist feature allows you to suppress output for specific processes based on their SHA256 hash.
+
+### Whitelist File Format
+
+Create a text file with one SHA256 hash per line:
+
+```
+# Whitelist file for egress-tracer
+# Lines starting with # are comments
+# Empty lines are ignored
+
+d4f7c9e8a1b2c3d4e5f6789012345678901234567890123456789012345678901234
+a1b2c3d4e5f6789012345678901234567890123456789012345678901234567890123
+```
+
+### Getting Process SHA256 Hashes
+
+To get the SHA256 hash of a process:
+
+```bash
+# Find process by name
+ps aux | grep process_name
+
+# Get SHA256 of the executable
+sha256sum /path/to/executable
+
+# Or use the tracer in JSON mode to see hashes
+sudo ./egress-tracer --json | jq -r '.process_sha256' | sort -u
+```
+
+### Usage Examples
+
+```bash
+# CLI mode with whitelist
+sudo ./egress-tracer --whitelist=trusted_processes.txt
+
+# TUI mode with whitelist  
+sudo ./egress-tracer --tui --whitelist=trusted_processes.txt
+
+# JSON logging with whitelist
+sudo ./egress-tracer --json --whitelist=trusted_processes.txt --log-file=events.jsonl
 ```
 
 ## Project Structure

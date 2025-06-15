@@ -41,15 +41,26 @@ func main() {
 	logMaxSize := flag.Int64("log-max-size", 100*1024*1024, "Maximum size of log file before rotation (bytes)")
 	logMaxFiles := flag.Int("log-max-files", 5, "Maximum number of rotated log files to keep")
 
+	// Whitelist filter options
+	whitelistFile := flag.String("whitelist", "", "Path to whitelist file containing SHA256 hashes (one per line)")
+
 	flag.Parse()
 
 	if *tuiMode {
-		runTUI(*cacheTTL, *cacheMaxSize, *tuiCacheMaxSize, *tuiCacheTTL)
+		runTUI(*cacheTTL, *cacheMaxSize, *tuiCacheMaxSize, *tuiCacheTTL, *whitelistFile)
 		return
 	}
 
 	// Initialize process cache with LRU and TTL
 	processCache := cache.NewProcessCache(*cacheTTL, *cacheMaxSize)
+
+	// Load whitelist if specified
+	if *whitelistFile != "" {
+		if err := processCache.LoadWhitelistFromFile(*whitelistFile); err != nil {
+			log.Fatalf("Loading whitelist file: %v", err)
+		}
+		log.Printf("Loaded whitelist from %s (%d hashes)", *whitelistFile, processCache.GetWhitelistFilter().GetHashCount())
+	}
 
 	// Initialize rotating logger if log file is specified
 	var rotatingLogger *logger.RotatingLogger
@@ -121,13 +132,27 @@ func main() {
 			continue
 		}
 
+		// Check if process is whitelisted (filtered out) by attempting to get process info
+		// If GetProcessInfo returns nil, the process is whitelisted and should be dropped
+		if processCache.GetProcessInfo(event.PID) == nil {
+			continue // Drop the event silently
+		}
+
 		output.PrintEventWithLogger(event, isTerminal, *jsonOutput, processCache, rotatingLogger)
 	}
 }
 
-func runTUI(cacheTTL time.Duration, cacheMaxSize int, tuiCacheMaxSize int, tuiCacheTTL time.Duration) {
+func runTUI(cacheTTL time.Duration, cacheMaxSize int, tuiCacheMaxSize int, tuiCacheTTL time.Duration, whitelistFile string) {
 	// Initialize process cache with LRU and TTL
 	processCache := cache.NewProcessCache(cacheTTL, cacheMaxSize)
+
+	// Load whitelist if specified
+	if whitelistFile != "" {
+		if err := processCache.LoadWhitelistFromFile(whitelistFile); err != nil {
+			log.Fatalf("Loading whitelist file: %v", err)
+		}
+		log.Printf("Loaded whitelist from %s (%d hashes)", whitelistFile, processCache.GetWhitelistFilter().GetHashCount())
+	}
 
 	// Create eBPF tracer
 	tracer, err := ebpf.New()
@@ -185,6 +210,12 @@ func runTUI(cacheTTL time.Duration, cacheMaxSize int, tuiCacheMaxSize int, tuiCa
 						return
 					}
 					continue
+				}
+
+				// Check if process is whitelisted (filtered out)
+				// If GetProcessInfo returns nil, the process is whitelisted and should be dropped
+				if processCache.GetProcessInfo(event.PID) == nil {
+					continue // Drop the event silently
 				}
 
 				// Convert ConnectionEvent to Event

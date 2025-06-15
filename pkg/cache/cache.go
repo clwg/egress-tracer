@@ -8,35 +8,59 @@ import (
 	"os"
 	"time"
 
+	"github.com/clwg/egress-tracer/pkg/filter"
 	"github.com/clwg/egress-tracer/pkg/types"
 	lru "github.com/hashicorp/golang-lru/v2/expirable"
 )
 
 // ProcessCache manages cached process information with LRU eviction
 type ProcessCache struct {
-	cache *lru.LRU[uint32, *types.ProcessInfo]
-	ttl   time.Duration
+	cache           *lru.LRU[uint32, *types.ProcessInfo]
+	ttl             time.Duration
+	whitelistFilter *filter.WhitelistFilter
 }
 
 // NewProcessCache creates a new process cache with the specified TTL and max size
 func NewProcessCache(ttl time.Duration, maxSize int) *ProcessCache {
 	cache := lru.NewLRU[uint32, *types.ProcessInfo](maxSize, nil, ttl)
 	return &ProcessCache{
-		cache: cache,
-		ttl:   ttl,
+		cache:           cache,
+		ttl:             ttl,
+		whitelistFilter: filter.NewWhitelistFilter(),
+	}
+}
+
+// NewProcessCacheWithFilter creates a new process cache with a whitelist filter
+func NewProcessCacheWithFilter(ttl time.Duration, maxSize int, whitelistFilter *filter.WhitelistFilter) *ProcessCache {
+	cache := lru.NewLRU[uint32, *types.ProcessInfo](maxSize, nil, ttl)
+	return &ProcessCache{
+		cache:           cache,
+		ttl:             ttl,
+		whitelistFilter: whitelistFilter,
 	}
 }
 
 // GetProcessInfo retrieves process information for a PID, caching it if not present
+// Returns nil if the process is whitelisted (should be filtered out)
 func (pc *ProcessCache) GetProcessInfo(pid uint32) *types.ProcessInfo {
 	// Check if we have cached info
 	if info, ok := pc.cache.Get(pid); ok {
+		// If it's whitelisted, return nil to indicate it should be filtered
+		if pc.whitelistFilter.IsWhitelisted(info.SHA256) {
+			return nil
+		}
 		return info
 	}
 
 	// Fetch new process info
 	newInfo := pc.fetchProcessInfo(pid)
 	if newInfo != nil {
+		// Check if the process is whitelisted before caching
+		if pc.whitelistFilter.IsWhitelisted(newInfo.SHA256) {
+			// Still cache it, but return nil to indicate filtering
+			pc.cache.Add(pid, newInfo)
+			return nil
+		}
 		pc.cache.Add(pid, newInfo)
 	}
 
@@ -83,4 +107,14 @@ func (pc *ProcessCache) calculateSHA256(filePath string) (string, error) {
 // CleanExpired removes expired entries from the cache (handled automatically by LRU)
 func (pc *ProcessCache) CleanExpired() {
 	// Expirable LRU handles TTL automatically, no manual cleanup needed
+}
+
+// GetWhitelistFilter returns the whitelist filter for runtime management
+func (pc *ProcessCache) GetWhitelistFilter() *filter.WhitelistFilter {
+	return pc.whitelistFilter
+}
+
+// LoadWhitelistFromFile loads whitelist from a file
+func (pc *ProcessCache) LoadWhitelistFromFile(filePath string) error {
+	return pc.whitelistFilter.LoadFromFile(filePath)
 }
