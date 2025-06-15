@@ -9,11 +9,13 @@
 #define SOCK_STREAM 1
 #define SOCK_DGRAM 2
 #define SOCK_RAW 3
+#define SOCK_SEQPACKET 5
 
 // Protocol constants
 #define IPPROTO_ICMP 1
 #define IPPROTO_TCP 6
 #define IPPROTO_UDP 17
+#define IPPROTO_SCTP 132
 
 typedef unsigned int socklen_t;
 
@@ -40,11 +42,19 @@ struct socket_info {
 };
 
 struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
     __uint(max_entries, 1024);
     __type(key, __u64);
     __type(value, struct socket_info);
 } socket_types SEC(".maps");
+
+// Temporary storage for socket creation (enter -> exit)
+struct {
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 512);
+    __type(key, __u64);
+    __type(value, struct socket_info);
+} temp_socket_info SEC(".maps");
 
 SEC("tracepoint/syscalls/sys_enter_socket")
 int trace_sys_enter_socket(struct trace_event_raw_sys_enter *ctx)
@@ -58,14 +68,28 @@ int trace_sys_enter_socket(struct trace_event_raw_sys_enter *ctx)
         return 0;
         
     __u64 pid_tgid = bpf_get_current_pid_tgid();
+    
+    // Set default protocol based on socket type if protocol is 0
+    __u16 actual_protocol = (__u16)protocol;
+    if (actual_protocol == 0) {
+        if (type == SOCK_STREAM) {
+            actual_protocol = IPPROTO_TCP;
+        } else if (type == SOCK_DGRAM) {
+            actual_protocol = IPPROTO_UDP;
+        } else if (type == SOCK_SEQPACKET) {
+            actual_protocol = IPPROTO_SCTP;
+        }
+        // For SOCK_RAW, keep protocol as 0 if not specified
+    }
+    
     struct socket_info sockinfo = {
         .type = (__u16)type,
-        .protocol = (__u16)protocol
+        .protocol = actual_protocol
     };
     
-    // Store socket info temporarily with pid_tgid as key
-    // We'll update this with the actual fd in sys_exit_socket
-    int ret = bpf_map_update_elem(&socket_types, &pid_tgid, &sockinfo, BPF_ANY);
+    // Store socket info temporarily with full pid_tgid as key
+    // This will be moved to the proper key in sys_exit_socket
+    int ret = bpf_map_update_elem(&temp_socket_info, &pid_tgid, &sockinfo, BPF_ANY);
     if (ret != 0)
         return 0;
     
@@ -78,26 +102,23 @@ int trace_sys_exit_socket(struct trace_event_raw_sys_exit *ctx)
     __u64 pid_tgid = bpf_get_current_pid_tgid();
     int sockfd = (int)ctx->ret;
     
-    // Only track successful socket creation  
-    if (sockfd < 0) {
-        // Remove the temporary entry
-        bpf_map_delete_elem(&socket_types, &pid_tgid);
+    // Get the socket info we stored in sys_enter_socket
+    struct socket_info *sockinfo = bpf_map_lookup_elem(&temp_socket_info, &pid_tgid);
+    
+    // Always clean up the temporary entry
+    bpf_map_delete_elem(&temp_socket_info, &pid_tgid);
+    
+    // Only store in main map if socket creation was successful
+    if (sockfd < 0 || !sockinfo) {
         return 0;
     }
         
-    // Get the socket info we stored in sys_enter_socket
-    struct socket_info *sockinfo = bpf_map_lookup_elem(&socket_types, &pid_tgid);
-    if (sockinfo) {
-        // Create a new key combining pid and fd - use upper 32 bits for pid_tgid, lower for sockfd
-        __u64 key = (pid_tgid & 0xFFFFFFFF00000000ULL) | ((__u64)sockfd & 0xFFFFFFFFULL);
-        int ret = bpf_map_update_elem(&socket_types, &key, sockinfo, BPF_ANY);
-        if (ret != 0) {
-            bpf_map_delete_elem(&socket_types, &pid_tgid);
-            return 0;
-        }
-        
-        // Remove the temporary entry
-        bpf_map_delete_elem(&socket_types, &pid_tgid);
+    // Create a new key: full pid_tgid in upper 32 bits, sockfd in lower 32 bits
+    __u64 key = (pid_tgid << 32) | ((__u64)sockfd & 0xFFFFFFFFULL);
+    int ret = bpf_map_update_elem(&socket_types, &key, sockinfo, BPF_ANY);
+    if (ret != 0) {
+        // Failed to store, but we already cleaned up temp entry
+        return 0;
     }
     
     return 0;
@@ -114,7 +135,7 @@ int trace_sys_enter_connect(struct trace_event_raw_sys_enter *ctx)
     __u16 dport = 0;
     __u8 flags = 0;
     int sockfd;
-    struct socket_info sockinfo = {.type = SOCK_STREAM, .protocol = IPPROTO_TCP}; // Default
+    struct socket_info sockinfo = {.type = 0, .protocol = 0}; // Initialize to unknown
 
     pid_tgid = bpf_get_current_pid_tgid();
     pid = pid_tgid;
@@ -123,8 +144,8 @@ int trace_sys_enter_connect(struct trace_event_raw_sys_enter *ctx)
     // Get socket file descriptor
     sockfd = (int)ctx->args[0];
 
-    // Look up socket info from our map - use upper 32 bits for pid_tgid, lower for sockfd
-    __u64 key = (pid_tgid & 0xFFFFFFFF00000000ULL) | ((__u64)sockfd & 0xFFFFFFFFULL);
+    // Look up socket info from our map - use full pid_tgid in upper 32 bits, sockfd in lower 32 bits
+    __u64 key = (pid_tgid << 32) | ((__u64)sockfd & 0xFFFFFFFFULL);
     struct socket_info *stored_sockinfo = bpf_map_lookup_elem(&socket_types, &key);
     if (stored_sockinfo) {
         sockinfo = *stored_sockinfo;
@@ -170,14 +191,42 @@ int trace_sys_enter_connect(struct trace_event_raw_sys_enter *ctx)
     event->src_port = 0;
     event->dst_port = dport;
     event->flags = flags;
+    
     // Set protocol based on socket type and stored protocol
-    if (sockinfo.type == SOCK_DGRAM) {
-        event->protocol = IPPROTO_UDP;
-    } else if (sockinfo.type == SOCK_RAW) {
-        // For raw sockets, use the protocol field directly
-        event->protocol = sockinfo.protocol;
+    // First try to use the stored socket information
+    if (stored_sockinfo) {
+        if (stored_sockinfo->type == SOCK_DGRAM) {
+            // SOCK_DGRAM can be UDP or other datagram protocols
+            if (stored_sockinfo->protocol == 0 || stored_sockinfo->protocol == IPPROTO_UDP) {
+                event->protocol = IPPROTO_UDP;
+            } else {
+                event->protocol = stored_sockinfo->protocol;
+            }
+        } else if (stored_sockinfo->type == SOCK_STREAM) {
+            // SOCK_STREAM is typically TCP
+            if (stored_sockinfo->protocol == 0 || stored_sockinfo->protocol == IPPROTO_TCP) {
+                event->protocol = IPPROTO_TCP;
+            } else {
+                event->protocol = stored_sockinfo->protocol;
+            }
+        } else if (stored_sockinfo->type == SOCK_SEQPACKET) {
+            // SOCK_SEQPACKET can be SCTP or other reliable packet protocols
+            if (stored_sockinfo->protocol == 0 || stored_sockinfo->protocol == IPPROTO_SCTP) {
+                event->protocol = IPPROTO_SCTP;
+            } else {
+                event->protocol = stored_sockinfo->protocol;
+            }
+        } else if (stored_sockinfo->type == SOCK_RAW) {
+            // For raw sockets, use the protocol field directly
+            event->protocol = stored_sockinfo->protocol;
+        } else {
+            // Unknown socket type, assume TCP for connect() calls
+            event->protocol = IPPROTO_TCP;
+        }
     } else {
-        event->protocol = IPPROTO_TCP; // SOCK_STREAM default
+        // No stored socket info, make educated guess based on syscall
+        // connect() is typically used with TCP (SOCK_STREAM)
+        event->protocol = IPPROTO_TCP;
     }
     
     bpf_get_current_comm(&event->comm, sizeof(event->comm));
@@ -190,16 +239,17 @@ SEC("tracepoint/syscalls/sys_enter_close")
 int trace_sys_enter_close(struct trace_event_raw_sys_enter *ctx)
 {
     __u64 pid_tgid = bpf_get_current_pid_tgid();
-    int sockfd = (int)ctx->args[0];
+    int fd = (int)ctx->args[0];
     
-    // Create key and remove from socket_types map
-    __u64 key = (pid_tgid & 0xFFFFFFFF00000000ULL) | ((__u64)sockfd & 0xFFFFFFFFULL);
-    bpf_map_delete_elem(&socket_types, &key);
+    // Create key and check if it exists before attempting to delete
+    __u64 key = (pid_tgid << 32) | ((__u64)fd & 0xFFFFFFFFULL);
+    struct socket_info *sockinfo = bpf_map_lookup_elem(&socket_types, &key);
+    if (sockinfo) {
+        bpf_map_delete_elem(&socket_types, &key);
+    }
     
     return 0;
 }
-
-
 
 SEC("tracepoint/syscalls/sys_enter_sendto")
 int trace_sys_enter_sendto(struct trace_event_raw_sys_enter *ctx)
@@ -212,7 +262,7 @@ int trace_sys_enter_sendto(struct trace_event_raw_sys_enter *ctx)
     __u16 dport = 0;
     __u8 flags = 0;
     int sockfd;
-    struct socket_info sockinfo = {.type = SOCK_DGRAM, .protocol = IPPROTO_UDP}; // Default
+    struct socket_info sockinfo = {.type = 0, .protocol = 0}; // Initialize to unknown
 
     pid_tgid = bpf_get_current_pid_tgid();
     pid = pid_tgid;
@@ -222,7 +272,7 @@ int trace_sys_enter_sendto(struct trace_event_raw_sys_enter *ctx)
     sockfd = (int)ctx->args[0];
 
     // Look up socket info from our map
-    __u64 key = (pid_tgid & 0xFFFFFFFF00000000ULL) | ((__u64)sockfd & 0xFFFFFFFFULL);
+    __u64 key = (pid_tgid << 32) | ((__u64)sockfd & 0xFFFFFFFFULL);
     struct socket_info *stored_sockinfo = bpf_map_lookup_elem(&socket_types, &key);
     if (stored_sockinfo) {
         sockinfo = *stored_sockinfo;
@@ -268,14 +318,42 @@ int trace_sys_enter_sendto(struct trace_event_raw_sys_enter *ctx)
     event->src_port = 0;
     event->dst_port = dport;
     event->flags = flags;
+    
     // Set protocol based on socket type and stored protocol
-    if (sockinfo.type == SOCK_DGRAM) {
-        event->protocol = IPPROTO_UDP;
-    } else if (sockinfo.type == SOCK_RAW) {
-        // For raw sockets, use the protocol field directly
-        event->protocol = sockinfo.protocol;
+    // First try to use the stored socket information
+    if (stored_sockinfo) {
+        if (stored_sockinfo->type == SOCK_DGRAM) {
+            // SOCK_DGRAM can be UDP or other datagram protocols
+            if (stored_sockinfo->protocol == 0 || stored_sockinfo->protocol == IPPROTO_UDP) {
+                event->protocol = IPPROTO_UDP;
+            } else {
+                event->protocol = stored_sockinfo->protocol;
+            }
+        } else if (stored_sockinfo->type == SOCK_STREAM) {
+            // SOCK_STREAM is typically TCP, but sendto can be used with connected TCP sockets
+            if (stored_sockinfo->protocol == 0 || stored_sockinfo->protocol == IPPROTO_TCP) {
+                event->protocol = IPPROTO_TCP;
+            } else {
+                event->protocol = stored_sockinfo->protocol;
+            }
+        } else if (stored_sockinfo->type == SOCK_SEQPACKET) {
+            // SOCK_SEQPACKET can be SCTP or other reliable packet protocols
+            if (stored_sockinfo->protocol == 0 || stored_sockinfo->protocol == IPPROTO_SCTP) {
+                event->protocol = IPPROTO_SCTP;
+            } else {
+                event->protocol = stored_sockinfo->protocol;
+            }
+        } else if (stored_sockinfo->type == SOCK_RAW) {
+            // For raw sockets, use the protocol field directly
+            event->protocol = stored_sockinfo->protocol;
+        } else {
+            // Unknown socket type, assume UDP for sendto() calls
+            event->protocol = IPPROTO_UDP;
+        }
     } else {
-        event->protocol = IPPROTO_TCP; // SOCK_STREAM default
+        // No stored socket info, make educated guess based on syscall
+        // sendto() is typically used with UDP (SOCK_DGRAM), but can be used with connected TCP
+        event->protocol = IPPROTO_UDP;
     }
     
     bpf_get_current_comm(&event->comm, sizeof(event->comm));
