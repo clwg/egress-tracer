@@ -162,7 +162,7 @@ func runTUI(cacheTTL time.Duration, cacheMaxSize int, tuiCacheMaxSize int, tuiCa
 	defer tracer.Close()
 
 	// Initialize TUI model
-	model := tui.NewModel(tuiCacheMaxSize, tuiCacheTTL)
+	model := tui.NewModelWithCache(tuiCacheMaxSize, tuiCacheTTL, processCache, whitelistFile)
 
 	// Create context for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())

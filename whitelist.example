@@ -3,9 +3,3 @@
 # Lines starting with # are comments and will be ignored
 # Empty lines are also ignored
 
-# Example hashes (these are not real process hashes)
-# d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2
-# a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
-
-# Add your process SHA256 hashes below:
-c8addf60507e54d9b5ca766492fec5386c5bf8775d7c6748c305a4e01f7f7145
