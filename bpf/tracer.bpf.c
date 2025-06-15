@@ -50,7 +50,9 @@ int trace_sys_enter_socket(struct trace_event_raw_sys_enter *ctx)
     
     // Store socket type temporarily with pid_tgid as key
     // We'll update this with the actual fd in sys_exit_socket
-    bpf_map_update_elem(&socket_types, &pid_tgid, &socktype, BPF_ANY);
+    int ret = bpf_map_update_elem(&socket_types, &pid_tgid, &socktype, BPF_ANY);
+    if (ret != 0)
+        return 0;
     
     return 0;
 }
@@ -71,9 +73,13 @@ int trace_sys_exit_socket(struct trace_event_raw_sys_exit *ctx)
     // Get the socket type we stored in sys_enter_socket
     __u16 *socktype = bpf_map_lookup_elem(&socket_types, &pid_tgid);
     if (socktype) {
-        // Create a new key combining pid and fd
-        __u64 key = ((__u64)pid_tgid << 32) | ((__u64)sockfd & 0xFFFFFFFF);
-        bpf_map_update_elem(&socket_types, &key, socktype, BPF_ANY);
+        // Create a new key combining pid and fd - use upper 32 bits for pid_tgid, lower for sockfd
+        __u64 key = (pid_tgid & 0xFFFFFFFF00000000ULL) | ((__u64)sockfd & 0xFFFFFFFFULL);
+        int ret = bpf_map_update_elem(&socket_types, &key, socktype, BPF_ANY);
+        if (ret != 0) {
+            bpf_map_delete_elem(&socket_types, &pid_tgid);
+            return 0;
+        }
         
         // Remove the temporary entry
         bpf_map_delete_elem(&socket_types, &pid_tgid);
@@ -101,21 +107,32 @@ int trace_sys_enter_connect(struct trace_event_raw_sys_enter *ctx)
     // Get socket file descriptor
     sockfd = (int)ctx->args[0];
 
-    // Look up socket type from our map
-    __u64 key = ((__u64)pid_tgid << 32) | ((__u64)sockfd & 0xFFFFFFFF);
+    // Look up socket type from our map - use upper 32 bits for pid_tgid, lower for sockfd
+    __u64 key = (pid_tgid & 0xFFFFFFFF00000000ULL) | ((__u64)sockfd & 0xFFFFFFFFULL);
     __u16 *stored_socktype = bpf_map_lookup_elem(&socket_types, &key);
     if (stored_socktype) {
         socktype = *stored_socktype;
     }
 
     addr = (struct sockaddr_in *)ctx->args[1];
+    socklen_t addrlen = (socklen_t)ctx->args[2];
+
+    // Validate address pointer and length
+    if (!addr || addrlen < sizeof(struct sockaddr_in))
+        return 0;
 
     if (addr) {
         __u16 family;
-        bpf_probe_read_user(&family, sizeof(family), &addr->sin_family);
+        int ret = bpf_probe_read_user(&family, sizeof(family), &addr->sin_family);
+        if (ret != 0)
+            return 0;
         if (family == AF_INET) {
-            bpf_probe_read_user(&daddr, sizeof(daddr), &addr->sin_addr.s_addr);
-            bpf_probe_read_user(&dport, sizeof(dport), &addr->sin_port);
+            ret = bpf_probe_read_user(&daddr, sizeof(daddr), &addr->sin_addr.s_addr);
+            if (ret != 0)
+                return 0;
+            ret = bpf_probe_read_user(&dport, sizeof(dport), &addr->sin_port);
+            if (ret != 0)
+                return 0;
         }
     }
 
@@ -155,13 +172,24 @@ int trace_sys_enter_sendto(struct trace_event_raw_sys_enter *ctx)
     tgid = pid_tgid >> 32;
 
     addr = (struct sockaddr_in *)ctx->args[4];
+    socklen_t addrlen = (socklen_t)ctx->args[5];
+
+    // Validate address pointer and length  
+    if (!addr || addrlen < sizeof(struct sockaddr_in))
+        return 0;
 
     if (addr) {
         __u16 family;
-        bpf_probe_read_user(&family, sizeof(family), &addr->sin_family);
+        int ret = bpf_probe_read_user(&family, sizeof(family), &addr->sin_family);
+        if (ret != 0)
+            return 0;
         if (family == AF_INET) {
-            bpf_probe_read_user(&daddr, sizeof(daddr), &addr->sin_addr.s_addr);
-            bpf_probe_read_user(&dport, sizeof(dport), &addr->sin_port);
+            ret = bpf_probe_read_user(&daddr, sizeof(daddr), &addr->sin_addr.s_addr);
+            if (ret != 0)
+                return 0;
+            ret = bpf_probe_read_user(&dport, sizeof(dport), &addr->sin_port);
+            if (ret != 0)
+                return 0;
         }
     }
 
