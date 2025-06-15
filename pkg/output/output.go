@@ -32,8 +32,13 @@ func PrintEventWithLogger(event *types.ConnectionEvent, isTerminal, jsonOutput b
 	dstPort := binary.BigEndian.Uint16((*(*[2]byte)(unsafe.Pointer(&event.DstPort)))[:])
 
 	protocol := "TCP"
-	if event.Protocol == 17 { // IPPROTO_UDP
+	switch event.Protocol {
+	case 1: // IPPROTO_ICMP
+		protocol = "ICMP"
+	case 17: // IPPROTO_UDP
 		protocol = "UDP"
+	default:
+		protocol = "TCP"
 	}
 
 	now := time.Now()
