@@ -23,6 +23,7 @@ import (
 	"github.com/clwg/egress-tracer/pkg/filter"
 	"github.com/clwg/egress-tracer/pkg/logger"
 	"github.com/clwg/egress-tracer/pkg/output"
+	"github.com/clwg/egress-tracer/pkg/theme"
 	"github.com/clwg/egress-tracer/pkg/tui"
 	"github.com/clwg/egress-tracer/pkg/types"
 )
@@ -46,10 +47,13 @@ func main() {
 	// Whitelist filter options
 	whitelistFile := flag.String("whitelist", "", "Path to whitelist file containing SHA256 hashes (one per line)")
 
+	// Theme options
+	themeName := flag.String("theme", "dark", fmt.Sprintf("TUI theme (%s)", strings.Join(theme.GetAvailableThemes(), ", ")))
+
 	flag.Parse()
 
 	if *tuiMode {
-		runTUI(*cacheTTL, *cacheMaxSize, *tuiCacheMaxSize, *tuiCacheTTL, *whitelistFile)
+		runTUI(*cacheTTL, *cacheMaxSize, *tuiCacheMaxSize, *tuiCacheTTL, *whitelistFile, *themeName)
 		return
 	}
 
@@ -148,7 +152,12 @@ func main() {
 	}
 }
 
-func runTUI(cacheTTL time.Duration, cacheMaxSize int, tuiCacheMaxSize int, tuiCacheTTL time.Duration, whitelistFile string) {
+func runTUI(cacheTTL time.Duration, cacheMaxSize int, tuiCacheMaxSize int, tuiCacheTTL time.Duration, whitelistFile string, themeName string) {
+	// Validate and get theme
+	selectedTheme, exists := theme.GetTheme(themeName)
+	if !exists {
+		log.Fatalf("Invalid theme '%s'. Available themes: %s", themeName, strings.Join(theme.GetAvailableThemes(), ", "))
+	}
 	// Initialize process cache with LRU and TTL
 	processCache := cache.NewProcessCache(cacheTTL, cacheMaxSize)
 
@@ -192,8 +201,8 @@ func runTUI(cacheTTL time.Duration, cacheMaxSize int, tuiCacheMaxSize int, tuiCa
 	}
 	defer tracer.Close()
 
-	// Initialize TUI model
-	model := tui.NewModelWithCache(tuiCacheMaxSize, tuiCacheTTL, processCache, whitelistFile)
+	// Initialize TUI model with theme
+	model := tui.NewModelWithCacheAndTheme(tuiCacheMaxSize, tuiCacheTTL, processCache, whitelistFile, selectedTheme)
 
 	// Create context for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
