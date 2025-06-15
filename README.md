@@ -137,6 +137,8 @@ sudo ./egress-tracer --tui
     │   └── cache.go           # PID-to-process name cache implementation
     ├── ebpf/                   # eBPF program management
     │   └── ebpf.go            # eBPF loader, event processor, and program lifecycle
+    ├── filter/                 # Process filtering and whitelist management
+    │   └── whitelist.go       # SHA256-based process whitelist filtering
     ├── logger/                 # Rotating JSON Lines logging
     │   └── rotating.go        # Rotating log file implementation with size-based rotation
     ├── output/                 # Event formatting and output
@@ -160,6 +162,8 @@ sudo ./egress-tracer --tui
 - **`pkg/ebpf/ebpf.go`**: eBPF program lifecycle management including loading, attaching to kernel hooks, processing ring buffer events, and cleanup. Contains the core tracer logic.
 
 - **`pkg/cache/cache.go`**: LRU cache implementation for process information lookup, reducing /proc filesystem access overhead for repeated PID queries.
+
+- **`pkg/filter/whitelist.go`**: SHA256-based process filtering system for suppressing output from trusted processes, with file-based persistence and interactive TUI management.
 
 - **`pkg/logger/rotating.go`**: Rotating JSON Lines logger with configurable file size limits and rotation policies, providing persistent structured logging for connection events.
 
