@@ -1,5 +1,0 @@
-# Whitelist file for egress-tracer
-# One SHA256 hash per line
-# Lines starting with # are comments and will be ignored
-# Empty lines are also ignored
-
