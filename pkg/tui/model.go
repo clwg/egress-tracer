@@ -175,13 +175,52 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tickCmd() // Schedule next tick
 
 	case tea.KeyMsg:
-		// Handle popup-specific keys first
+		// Handle popup-specific keys
 		if m.showPopup {
+			// For whitelist popup, handle text input first if input is focused
+			if m.popupType == popupWhitelist && m.whitelistInput.Focused() {
+				// Handle special keys that should not go to text input
+				switch msg.String() {
+				case "ctrl+c":
+					return m, tea.Quit
+				case "esc":
+					m.showPopup = false
+					m.popupType = popupDetails
+					m.popupData = nil
+					m.whitelistConfirming = false
+					m.whitelistInput.SetValue("")
+					m.whitelistInput.Blur()
+					return m, nil
+				case "enter":
+					if !m.whitelistConfirming {
+						// First enter - confirm the whitelist entry
+						m.whitelistConfirming = true
+						return m, nil
+					} else {
+						// Second enter - actually add to whitelist
+						if err := m.addToWhitelist(); err != nil {
+							// TODO: Show error message - for now just close popup
+						}
+						m.showPopup = false
+						m.popupType = popupDetails
+						m.popupData = nil
+						m.whitelistConfirming = false
+						m.whitelistInput.SetValue("")
+						return m, nil
+					}
+				default:
+					// All other keys (including 'q') go to text input
+					m.whitelistInput, cmd = m.whitelistInput.Update(msg)
+					return m, cmd
+				}
+			}
+
+			// Handle keys for other popup types or when whitelist input is not focused
 			switch msg.String() {
-			case "q", "ctrl+c":
+			case "ctrl+c":
 				return m, tea.Quit
 
-			case "esc":
+			case "q", "esc":
 				m.showPopup = false
 				m.popupType = popupDetails
 				m.popupData = nil
@@ -191,32 +230,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 
 			case "enter":
-				if m.popupType == popupWhitelist && !m.whitelistConfirming {
-					// First enter - confirm the whitelist entry
-					m.whitelistConfirming = true
-					return m, nil
-				} else if m.popupType == popupWhitelist && m.whitelistConfirming {
-					// Second enter - actually add to whitelist
-					if err := m.addToWhitelist(); err != nil {
-						// TODO: Show error message - for now just close popup
-					}
-					m.showPopup = false
-					m.popupType = popupDetails
-					m.popupData = nil
-					m.whitelistConfirming = false
-					m.whitelistInput.SetValue("")
-					return m, nil
-				} else if m.popupType == popupDetails {
+				if m.popupType == popupDetails {
 					// Close details popup
 					m.showPopup = false
 					m.popupData = nil
 					return m, nil
 				}
-			}
-			// For whitelist popup, handle text input
-			if m.popupType == popupWhitelist {
-				m.whitelistInput, cmd = m.whitelistInput.Update(msg)
-				return m, cmd
 			}
 			// Other keys are ignored when popup is shown
 			return m, nil
