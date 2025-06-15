@@ -327,9 +327,9 @@ func (m *Model) View() string {
 
 	var helpText string
 	if m.whitelistFile != "" {
-		helpText = "Keys: 1-8 sort columns | r reset | enter details | w add to whitelist | q quit"
+		helpText = "Keys: 1-8 sort columns | enter details | w whitelist process | r reset | q quit"
 	} else {
-		helpText = "Keys: 1-8 sort columns | r reset | enter details | q quit"
+		helpText = "Keys: 1-8 sort columns | enter details | r reset | q quit"
 	}
 	help := helpStyle.Render(helpText)
 	b.WriteString(help + "\n\n")
