@@ -16,10 +16,12 @@ import (
 
 // Tracer manages eBPF program lifecycle and event processing
 type Tracer struct {
-	objs        tracerObjects
-	connectLink link.Link
-	sendtoLink  link.Link
-	reader      *ringbuf.Reader
+	objs            tracerObjects
+	connectLink     link.Link
+	sendtoLink      link.Link
+	socketEnterLink link.Link
+	socketExitLink  link.Link
+	reader          *ringbuf.Reader
 }
 
 // New creates a new eBPF tracker instance
@@ -75,6 +77,16 @@ func (t *Tracer) attachTracepoints() error {
 		return err
 	}
 
+	t.socketEnterLink, err = link.Tracepoint("syscalls", "sys_enter_socket", t.objs.TraceSysEnterSocket, nil)
+	if err != nil {
+		return err
+	}
+
+	t.socketExitLink, err = link.Tracepoint("syscalls", "sys_exit_socket", t.objs.TraceSysExitSocket, nil)
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -116,6 +128,18 @@ func (t *Tracer) Close() error {
 
 	if t.sendtoLink != nil {
 		if err := t.sendtoLink.Close(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+
+	if t.socketEnterLink != nil {
+		if err := t.socketEnterLink.Close(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+
+	if t.socketExitLink != nil {
+		if err := t.socketExitLink.Close(); err != nil {
 			errs = append(errs, err)
 		}
 	}
