@@ -151,9 +151,23 @@ int trace_sys_enter_connect(struct trace_event_raw_sys_enter *ctx)
     event->dst_port = dport;
     // Set protocol based on socket type
     event->protocol = (socktype == SOCK_DGRAM) ? IPPROTO_UDP : IPPROTO_TCP;
+    
     bpf_get_current_comm(&event->comm, sizeof(event->comm));
 
     bpf_ringbuf_submit(event, 0);
+    return 0;
+}
+
+SEC("tracepoint/syscalls/sys_enter_close")
+int trace_sys_enter_close(struct trace_event_raw_sys_enter *ctx)
+{
+    __u64 pid_tgid = bpf_get_current_pid_tgid();
+    int sockfd = (int)ctx->args[0];
+    
+    // Create key and remove from socket_types map
+    __u64 key = (pid_tgid & 0xFFFFFFFF00000000ULL) | ((__u64)sockfd & 0xFFFFFFFFULL);
+    bpf_map_delete_elem(&socket_types, &key);
+    
     return 0;
 }
 
@@ -207,6 +221,7 @@ int trace_sys_enter_sendto(struct trace_event_raw_sys_enter *ctx)
     event->src_port = 0;
     event->dst_port = dport;
     event->protocol = IPPROTO_UDP;
+    
     bpf_get_current_comm(&event->comm, sizeof(event->comm));
 
     bpf_ringbuf_submit(event, 0);
