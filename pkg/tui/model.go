@@ -12,6 +12,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/clwg/egress-tracer/pkg/cache"
+	"github.com/clwg/egress-tracer/pkg/theme"
 	"github.com/clwg/egress-tracer/pkg/types"
 )
 
@@ -62,6 +63,7 @@ type Model struct {
 	whitelistFile       string
 	whitelistInput      textinput.Model
 	whitelistConfirming bool
+	theme               theme.Theme
 }
 
 type EventMsg struct {
@@ -81,6 +83,10 @@ func NewModel(cacheMaxSize int, cacheTTL time.Duration) Model {
 }
 
 func NewModelWithCache(cacheMaxSize int, cacheTTL time.Duration, processCache *cache.ProcessCache, whitelistFile string) Model {
+	return NewModelWithCacheAndTheme(cacheMaxSize, cacheTTL, processCache, whitelistFile, theme.GetDefaultTheme())
+}
+
+func NewModelWithCacheAndTheme(cacheMaxSize int, cacheTTL time.Duration, processCache *cache.ProcessCache, whitelistFile string, selectedTheme theme.Theme) Model {
 	// Initialize with default column headers (will be updated dynamically)
 	columns := []table.Column{
 		{Title: "Process", Width: 19},
@@ -102,12 +108,14 @@ func NewModelWithCache(cacheMaxSize int, cacheTTL time.Duration, processCache *c
 	s := table.DefaultStyles()
 	s.Header = s.Header.
 		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color("240")).
+		BorderForeground(selectedTheme.TableHeaderBorder).
 		BorderBottom(true).
-		Bold(false)
+		Bold(false).
+		Foreground(selectedTheme.TableHeaderForeground).
+		Background(selectedTheme.TableHeaderBackground)
 	s.Selected = s.Selected.
-		Foreground(lipgloss.Color("229")).
-		Background(lipgloss.Color("57")).
+		Foreground(selectedTheme.TableSelectedForeground).
+		Background(selectedTheme.TableSelectedBackground).
 		Bold(false)
 	t.SetStyles(s)
 
@@ -129,6 +137,7 @@ func NewModelWithCache(cacheMaxSize int, cacheTTL time.Duration, processCache *c
 		processCache:   processCache,
 		whitelistFile:  whitelistFile,
 		whitelistInput: ti,
+		theme:          selectedTheme,
 	}
 
 	// Set initial column headers with sort indicators
@@ -305,12 +314,12 @@ func (m *Model) View() string {
 
 	// Header with stats
 	headerStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("86")).
+		Foreground(m.theme.HeaderForeground).
 		Bold(true).
 		Padding(0, 1)
 
 	statsStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("243")).
+		Foreground(m.theme.StatsForeground).
 		Padding(0, 1)
 
 	uptime := time.Since(m.startTime).Round(time.Second)
@@ -322,7 +331,7 @@ func (m *Model) View() string {
 
 	// Instructions above table
 	helpStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("241")).
+		Foreground(m.theme.HelpForeground).
 		Padding(0, 1)
 
 	var helpText string
@@ -493,18 +502,21 @@ func (m *Model) renderDetailsPopup() string {
 
 	// Define consistent field styling
 	labelStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("86")).
+		Foreground(m.theme.PopupLabelForeground).
+		Background(m.theme.PopupBackground).
 		Bold(true)
 
 	valueStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("255"))
+		Foreground(m.theme.PopupValueForeground).
+		Background(m.theme.PopupBackground)
 
 	// Build content with consistent formatting
 	var content strings.Builder
 
 	// Title
 	titleStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("86")).
+		Foreground(m.theme.PopupLabelForeground).
+		Background(m.theme.PopupBackground).
 		Bold(true).
 		Underline(true)
 
@@ -513,10 +525,11 @@ func (m *Model) renderDetailsPopup() string {
 
 	// Helper function to add a field
 	addField := func(label, value string) {
-		content.WriteString(labelStyle.Render(fmt.Sprintf("%-16s", label+":")))
-		content.WriteString(" ")
-		content.WriteString(valueStyle.Render(value))
-		content.WriteString("\n")
+		// Render the label part with label styling, value part with value styling
+		labelPart := labelStyle.Render(fmt.Sprintf("%-16s ", label+":"))
+		valuePart := valueStyle.Render(value)
+		
+		content.WriteString(labelPart + valuePart + "\n")
 	}
 
 	// Add all fields
@@ -535,14 +548,16 @@ func (m *Model) renderDetailsPopup() string {
 	// Add help text
 	content.WriteString("\n")
 	helpStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("241")).
+		Foreground(m.theme.HelpForeground).
+		Background(m.theme.PopupBackground).
 		Italic(true)
 	content.WriteString(helpStyle.Render("Press ESC to close"))
 
 	// Style the popup
 	popupStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("86")).
+		BorderForeground(m.theme.DetailsPopupBorder).
+		Background(m.theme.PopupBackground).
 		Padding(1, 2)
 
 	popup := popupStyle.Render(content.String())
@@ -571,21 +586,27 @@ func (m *Model) renderWhitelistPopup() string {
 
 	// Title
 	titleStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("212")).
+		Foreground(m.theme.WhitelistPopupBorder).
+		Background(m.theme.PopupBackground).
 		Bold(true)
 	content.WriteString(titleStyle.Render("Add to Whitelist"))
 	content.WriteString("\n\n")
 
 	// Show process information
 	labelStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("86")).
+		Foreground(m.theme.PopupLabelForeground).
+		Background(m.theme.PopupBackground).
 		Bold(true)
 
 	valueStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("255"))
+		Foreground(m.theme.PopupValueForeground).
+		Background(m.theme.PopupBackground)
 
 	addField := func(label, value string) {
-		content.WriteString(labelStyle.Render(label+": ") + valueStyle.Render(value) + "\n")
+		// Create seamless line with consistent background
+		labelPart := labelStyle.Render(label + ": ")
+		valuePart := valueStyle.Render(value)
+		content.WriteString(labelPart + valuePart + "\n")
 	}
 
 	addField("Process", data.Event.Process)
@@ -601,7 +622,8 @@ func (m *Model) renderWhitelistPopup() string {
 
 	// Instructions
 	helpStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("241")).
+		Foreground(m.theme.HelpForeground).
+		Background(m.theme.PopupBackground).
 		Italic(true)
 
 	if !m.whitelistConfirming {
@@ -613,7 +635,8 @@ func (m *Model) renderWhitelistPopup() string {
 	// Style the popup
 	popupStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("212")).
+		BorderForeground(m.theme.WhitelistPopupBorder).
+		Background(m.theme.PopupBackground).
 		Padding(1, 2)
 
 	popup := popupStyle.Render(content.String())

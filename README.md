@@ -29,6 +29,9 @@ make clean && make build && ./egress-tracer -h
 # Terminal User Interface (TUI) mode
 sudo ./egress-tracer --tui
 
+# TUI with theme selection (available themes: dark, light, monochrome, blue, rainbow)
+sudo ./egress-tracer --tui --theme light
+
 # TUI with a whitelist and removing connections from view after 30 seconds
 sudo ./egress-tracer -whitelist whitelist.txt -tui -tui-cache-ttl 30s
 ```
@@ -94,6 +97,28 @@ sudo ./egress-tracer --json --whitelist=trusted_processes.txt --log-file=events.
 
 **Note**: If the whitelist file doesn't exist, you'll be prompted to create it automatically.
 
+## TUI Theme Usage Examples
+
+Some basic theme are available for the TUI interface.
+
+```bash
+# Use light theme (great for white terminal backgrounds)
+sudo ./egress-tracer --tui --theme light
+
+# Use monochrome theme (minimal, professional)
+sudo ./egress-tracer --tui --theme monochrome
+
+# Use rainbow theme (colorful and fun)
+sudo ./egress-tracer --tui --theme rainbow
+
+# Use blue theme
+sudo ./egress-tracer --tui --theme blue
+
+# Default dark theme (no flag needed)
+sudo ./egress-tracer --tui
+```
+
+
 ## Project Structure
 
 ```
@@ -112,10 +137,14 @@ sudo ./egress-tracer --json --whitelist=trusted_processes.txt --log-file=events.
     │   └── cache.go           # PID-to-process name cache implementation
     ├── ebpf/                   # eBPF program management
     │   └── ebpf.go            # eBPF loader, event processor, and program lifecycle
+    ├── filter/                 # Process filtering and whitelist management
+    │   └── whitelist.go       # SHA256-based process whitelist filtering
     ├── logger/                 # Rotating JSON Lines logging
     │   └── rotating.go        # Rotating log file implementation with size-based rotation
     ├── output/                 # Event formatting and output
     │   └── output.go          # Connection event formatting (JSON/text/JSONL)
+    ├── theme/                  # TUI theme system
+    │   └── theme.go           # Color theme definitions and management
     ├── tui/                    # Terminal User Interface
     │   └── model.go           # Interactive TUI with real-time connection monitoring
     └── types/                  # Shared data structures
@@ -134,11 +163,15 @@ sudo ./egress-tracer --json --whitelist=trusted_processes.txt --log-file=events.
 
 - **`pkg/cache/cache.go`**: LRU cache implementation for process information lookup, reducing /proc filesystem access overhead for repeated PID queries.
 
+- **`pkg/filter/whitelist.go`**: SHA256-based process filtering system for suppressing output from trusted processes, with file-based persistence and interactive TUI management.
+
 - **`pkg/logger/rotating.go`**: Rotating JSON Lines logger with configurable file size limits and rotation policies, providing persistent structured logging for connection events.
 
 - **`pkg/output/output.go`**: Event formatting and output handling, supporting human-readable text, JSON, and rotating JSONL output formats for connection events.
 
-- **`pkg/tui/model.go`**: Terminal User Interface implementation using Bubble Tea framework, providing interactive real-time connection monitoring with sortable columns, connection grouping, cache management, and detailed popup views.
+- **`pkg/theme/theme.go`**: TUI theme system providing multiple color schemes (dark, light, monochrome, blue, rainbow) with consistent styling across all interface elements including tables, popups, and help text.
+
+- **`pkg/tui/model.go`**: Terminal User Interface implementation using Bubble Tea framework, providing interactive real-time connection monitoring with sortable columns, connection grouping, cache management, detailed popup views, and theme support.
 
 - **`pkg/types/types.go`**: Shared data structures and type definitions used across packages, including connection event types and configuration options.
 
