@@ -26,10 +26,7 @@ make clean && make build && ./egress-tracer -h
 ## Usage (requires root privileges)
 
 ```bash
-# CLI mode
-sudo ./egress-tracer
-
-# TUI mode (Terminal User Interface)
+# Terminal User Interface (TUI) mode
 sudo ./egress-tracer --tui
 
 # TUI with a whitelist and removing connections from view after 30 seconds
@@ -37,21 +34,28 @@ sudo ./egress-tracer -whitelist whitelist.txt -tui -tui-cache-ttl 30s
 ```
 
 # Options for CLI mode
+```bash
 sudo ./egress-tracer --json                    # JSON output
-
+```
 # Whitelist filtering (suppress output for specific processes)
+```bash
 sudo ./egress-tracer --whitelist=whitelist.txt # Load SHA256 whitelist from file
+```
+
 
 # Rotating JSONL Logging
+```bash
 sudo ./egress-tracer --log-file=/var/log/egress-tracer.jsonl          # Enable rotating JSONL logging
+
 sudo ./egress-tracer --log-file=/var/log/egress-tracer.jsonl \
                     --log-max-size=52428800 \                  # Max file size before rotation (50MB)
                     --log-max-files=10                         # Max number of rotated files
+```
 
 # Process Cache which offloads /proc lookups
+```bash
 sudo ./egress-tracer --cache-ttl=10m           # PID Cache TTL
 sudo ./egress-tracer --cache-max-size=500      # PID Cache size
-
 ```
 
 ## Whitelist Filtering
