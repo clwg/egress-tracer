@@ -173,7 +173,6 @@ func CreateWhitelistFile(filePath string) error {
 # One SHA256 hash per line
 # Lines starting with # are comments and will be ignored
 # Empty lines are also ignored
-
 `
 
 	if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {

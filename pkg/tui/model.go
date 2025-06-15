@@ -166,35 +166,66 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tickCmd() // Schedule next tick
 
 	case tea.KeyMsg:
-		switch msg.String() {
-		case "q", "ctrl+c":
-			return m, tea.Quit
+		// Handle popup-specific keys first
+		if m.showPopup {
+			switch msg.String() {
+			case "q", "ctrl+c":
+				return m, tea.Quit
 
-		case "enter":
-			if m.showPopup && m.popupType == popupWhitelist && !m.whitelistConfirming {
-				// First enter - confirm the whitelist entry
-				m.whitelistConfirming = true
-				return m, nil
-			} else if m.showPopup && m.popupType == popupWhitelist && m.whitelistConfirming {
-				// Second enter - actually add to whitelist
-				if err := m.addToWhitelist(); err != nil {
-					// TODO: Show error message - for now just close popup
-				}
+			case "esc":
 				m.showPopup = false
 				m.popupType = popupDetails
 				m.popupData = nil
 				m.whitelistConfirming = false
 				m.whitelistInput.SetValue("")
+				m.whitelistInput.Blur()
 				return m, nil
-			} else if !m.showPopup {
-				m.showPopup = true
-				m.popupType = popupDetails
-				m.popupData = m.getSelectedConnection()
+
+			case "enter":
+				if m.popupType == popupWhitelist && !m.whitelistConfirming {
+					// First enter - confirm the whitelist entry
+					m.whitelistConfirming = true
+					return m, nil
+				} else if m.popupType == popupWhitelist && m.whitelistConfirming {
+					// Second enter - actually add to whitelist
+					if err := m.addToWhitelist(); err != nil {
+						// TODO: Show error message - for now just close popup
+					}
+					m.showPopup = false
+					m.popupType = popupDetails
+					m.popupData = nil
+					m.whitelistConfirming = false
+					m.whitelistInput.SetValue("")
+					return m, nil
+				} else if m.popupType == popupDetails {
+					// Close details popup
+					m.showPopup = false
+					m.popupData = nil
+					return m, nil
+				}
 			}
+			// For whitelist popup, handle text input
+			if m.popupType == popupWhitelist {
+				m.whitelistInput, cmd = m.whitelistInput.Update(msg)
+				return m, cmd
+			}
+			// Other keys are ignored when popup is shown
+			return m, nil
+		}
+
+		// Handle main window keys only when no popup is shown
+		switch msg.String() {
+		case "q", "ctrl+c":
+			return m, tea.Quit
+
+		case "enter":
+			m.showPopup = true
+			m.popupType = popupDetails
+			m.popupData = m.getSelectedConnection()
 			return m, nil
 
 		case "w":
-			if !m.showPopup && m.whitelistFile != "" {
+			if m.whitelistFile != "" {
 				// Open whitelist popup for selected connection (only if whitelist is configured)
 				selectedData := m.getSelectedConnection()
 				if selectedData != nil && selectedData.Event.ProcessSHA256 != "" {
@@ -206,89 +237,58 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 
-		case "esc":
-			if m.showPopup {
-				m.showPopup = false
-				m.popupType = popupDetails
-				m.popupData = nil
-				m.whitelistConfirming = false
-				m.whitelistInput.SetValue("")
-				m.whitelistInput.Blur()
-			}
-			return m, nil
-
 		case "1":
-			if !m.showPopup {
-				m.sortBy = sortByProcess
-				m.sortDesc = !m.sortDesc
-				m.updateTable()
-			}
+			m.sortBy = sortByProcess
+			m.sortDesc = !m.sortDesc
+			m.updateTable()
 
 		case "2":
-			if !m.showPopup {
-				m.sortBy = sortByDestination
-				m.sortDesc = !m.sortDesc
-				m.updateTable()
-			}
+			m.sortBy = sortByDestination
+			m.sortDesc = !m.sortDesc
+			m.updateTable()
 
 		case "3":
-			if !m.showPopup {
-				m.sortBy = sortByPort
-				m.sortDesc = !m.sortDesc
-				m.updateTable()
-			}
+			m.sortBy = sortByPort
+			m.sortDesc = !m.sortDesc
+			m.updateTable()
 
 		case "4":
-			if !m.showPopup {
-				m.sortBy = sortByProtocol
-				m.sortDesc = !m.sortDesc
-				m.updateTable()
-			}
+			m.sortBy = sortByProtocol
+			m.sortDesc = !m.sortDesc
+			m.updateTable()
 
 		case "5":
-			if !m.showPopup {
-				m.sortBy = sortByFirstSeen
-				m.sortDesc = !m.sortDesc
-				m.updateTable()
-			}
+			m.sortBy = sortByFirstSeen
+			m.sortDesc = !m.sortDesc
+			m.updateTable()
 
 		case "6":
-			if !m.showPopup {
-				m.sortBy = sortByLastSeen
-				m.sortDesc = !m.sortDesc
-				m.updateTable()
-			}
+			m.sortBy = sortByLastSeen
+			m.sortDesc = !m.sortDesc
+			m.updateTable()
 
 		case "7":
-			if !m.showPopup {
-				m.sortBy = sortByCount
-				m.sortDesc = !m.sortDesc
-				m.updateTable()
-			}
+			m.sortBy = sortByCount
+			m.sortDesc = !m.sortDesc
+			m.updateTable()
 
 		case "8":
-			if !m.showPopup {
-				m.sortBy = sortBySHA256
-				m.sortDesc = !m.sortDesc
-				m.updateTable()
-			}
+			m.sortBy = sortBySHA256
+			m.sortDesc = !m.sortDesc
+			m.updateTable()
 
 		case "r":
-			if !m.showPopup {
-				// Refresh - clear all data
-				m.connections = make(map[string]*ConnectionData)
-				m.totalEvents = 0
-				m.startTime = time.Now()
-				m.updateTable()
-			}
+			// Refresh - clear all data
+			m.connections = make(map[string]*ConnectionData)
+			m.totalEvents = 0
+			m.startTime = time.Now()
+			m.updateTable()
 		}
 	}
 
+	// Update table only when no popup is shown
 	if !m.showPopup {
 		m.table, cmd = m.table.Update(msg)
-	} else if m.showPopup && m.popupType == popupWhitelist {
-		// Handle text input for whitelist popup
-		m.whitelistInput, cmd = m.whitelistInput.Update(msg)
 	}
 	return m, cmd
 }
