@@ -20,8 +20,7 @@ sudo apt install -y \
 ## Build
 
 ```bash
-# Build main binary
-make build
+make clean && make build && ./egress-tracer -h
 ```
 
 ## Usage (requires root privileges)
@@ -32,6 +31,10 @@ sudo ./egress-tracer
 
 # TUI mode (Terminal User Interface)
 sudo ./egress-tracer --tui
+
+# TUI with a whitelist and removing connections from view after 30 seconds
+sudo ./egress-tracer -whitelist whitelist.txt -tui -tui-cache-ttl 30s
+```
 
 # Options for CLI mode
 sudo ./egress-tracer --json                    # JSON output
@@ -53,7 +56,11 @@ sudo ./egress-tracer --cache-max-size=500      # PID Cache size
 
 ## Whitelist Filtering
 
-The whitelist feature allows you to suppress output for specific processes based on their SHA256 hash.
+The whitelist feature allows you to suppress output for specific processes based on their SHA256 hash. Whitelist entries can be loaded from a file at startup or added interactively via the TUI.
+
+### Interactive TUI Management
+
+In TUI mode with `--whitelist` parameter, press `w` on any connection to add its process to the whitelist: **Requires starting with `--whitelist=filename`**. Changes are saved to the specified whitelist file and take effect immediately.
 
 ### Whitelist File Format
 
@@ -68,33 +75,20 @@ d4f7c9e8a1b2c3d4e5f6789012345678901234567890123456789012345678901234
 a1b2c3d4e5f6789012345678901234567890123456789012345678901234567890123
 ```
 
-### Getting Process SHA256 Hashes
-
-To get the SHA256 hash of a process:
-
-```bash
-# Find process by name
-ps aux | grep process_name
-
-# Get SHA256 of the executable
-sha256sum /path/to/executable
-
-# Or use the tracer in JSON mode to see hashes
-sudo ./egress-tracer --json | jq -r '.process_sha256' | sort -u
-```
-
 ### Usage Examples
 
 ```bash
 # CLI mode with whitelist
 sudo ./egress-tracer --whitelist=trusted_processes.txt
 
-# TUI mode with whitelist  
+# TUI mode with whitelist (enables interactive 'w' key - requires --whitelist parameter)
 sudo ./egress-tracer --tui --whitelist=trusted_processes.txt
 
 # JSON logging with whitelist
 sudo ./egress-tracer --json --whitelist=trusted_processes.txt --log-file=events.jsonl
 ```
+
+**Note**: If the whitelist file doesn't exist, you'll be prompted to create it automatically.
 
 ## Project Structure
 
