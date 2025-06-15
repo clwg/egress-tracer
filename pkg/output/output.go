@@ -31,6 +31,24 @@ func PrintEventWithLogger(event *types.ConnectionEvent, isTerminal, jsonOutput b
 	// Convert ports from network byte order
 	dstPort := binary.BigEndian.Uint16((*(*[2]byte)(unsafe.Pointer(&event.DstPort)))[:])
 
+	// Check for read errors and add warning
+	var errorWarning string
+	if event.Flags != 0 {
+		var errors []string
+		if event.Flags&types.FLAG_ADDR_READ_FAILED != 0 {
+			errors = append(errors, "addr_read_failed")
+		}
+		if event.Flags&types.FLAG_PORT_READ_FAILED != 0 {
+			errors = append(errors, "port_read_failed")
+		}
+		if event.Flags&types.FLAG_FAMILY_READ_FAILED != 0 {
+			errors = append(errors, "family_read_failed")
+		}
+		if len(errors) > 0 {
+			errorWarning = fmt.Sprintf(" [eBPF_errors: %v]", errors)
+		}
+	}
+
 	protocol := "TCP"
 	switch event.Protocol {
 	case 1: // IPPROTO_ICMP
@@ -51,16 +69,16 @@ func PrintEventWithLogger(event *types.ConnectionEvent, isTerminal, jsonOutput b
 	}
 
 	if jsonOutput {
-		printJSONEvent(now, comm, event, protocol, dstIP, dstPort, processPath, processHash, rotatingLogger)
+		printJSONEvent(now, comm, event, protocol, dstIP, dstPort, processPath, processHash, errorWarning, rotatingLogger)
 	} else if isTerminal {
-		printTerminalEvent(now, comm, event, protocol, dstIP, dstPort, processPath)
+		printTerminalEvent(now, comm, event, protocol, dstIP, dstPort, processPath, errorWarning)
 	} else {
-		printPipeEvent(now, comm, event, protocol, dstIP, dstPort, processPath, processHash)
+		printPipeEvent(now, comm, event, protocol, dstIP, dstPort, processPath, processHash, errorWarning)
 	}
 }
 
 // printJSONEvent outputs event in JSON format
-func printJSONEvent(now time.Time, comm string, event *types.ConnectionEvent, protocol, dstIP string, dstPort uint16, processPath, processHash string, rotatingLogger *logger.RotatingLogger) {
+func printJSONEvent(now time.Time, comm string, event *types.ConnectionEvent, protocol, dstIP string, dstPort uint16, processPath, processHash, errorWarning string, rotatingLogger *logger.RotatingLogger) {
 	evt := types.Event{
 		Timestamp:     now.Format(time.RFC3339),
 		Process:       comm,
@@ -71,6 +89,7 @@ func printJSONEvent(now time.Time, comm string, event *types.ConnectionEvent, pr
 		Port:          dstPort,
 		ProcessPath:   processPath,
 		ProcessSHA256: processHash,
+		Errors:        errorWarning,
 	}
 	if data, err := json.Marshal(evt); err == nil {
 		if rotatingLogger != nil {
@@ -86,20 +105,20 @@ func printJSONEvent(now time.Time, comm string, event *types.ConnectionEvent, pr
 }
 
 // printTerminalEvent outputs colored terminal event
-func printTerminalEvent(now time.Time, comm string, event *types.ConnectionEvent, protocol, dstIP string, dstPort uint16, processPath string) {
+func printTerminalEvent(now time.Time, comm string, event *types.ConnectionEvent, protocol, dstIP string, dstPort uint16, processPath, errorWarning string) {
 	if processPath != "" {
-		fmt.Printf("[%s] \033[1;36m%-12s\033[0m (PID: \033[1;33m%d\033[0m, Path: \033[1;34m%s\033[0m) \033[1;32m%s\033[0m connection to \033[1;35m%s:%d\033[0m\n",
-			now.Format("15:04:05"), comm, event.PID, processPath, protocol, dstIP, dstPort)
+		fmt.Printf("[%s] \033[1;36m%-12s\033[0m (PID: \033[1;33m%d\033[0m, Path: \033[1;34m%s\033[0m) \033[1;32m%s\033[0m connection to \033[1;35m%s:%d\033[0m%s\n",
+			now.Format("15:04:05"), comm, event.PID, processPath, protocol, dstIP, dstPort, errorWarning)
 	} else {
-		fmt.Printf("[%s] \033[1;36m%-12s\033[0m (PID: \033[1;33m%d\033[0m) \033[1;32m%s\033[0m connection to \033[1;35m%s:%d\033[0m\n",
-			now.Format("15:04:05"), comm, event.PID, protocol, dstIP, dstPort)
+		fmt.Printf("[%s] \033[1;36m%-12s\033[0m (PID: \033[1;33m%d\033[0m) \033[1;32m%s\033[0m connection to \033[1;35m%s:%d\033[0m%s\n",
+			now.Format("15:04:05"), comm, event.PID, protocol, dstIP, dstPort, errorWarning)
 	}
 }
 
 // printPipeEvent outputs machine-parsable pipe-delimited event
-func printPipeEvent(now time.Time, comm string, event *types.ConnectionEvent, protocol, dstIP string, dstPort uint16, processPath, processHash string) {
-	fmt.Printf("%s|%s|%d|%d|%s|%s|%d|%s|%s\n",
-		now.Format("2006-01-02 15:04:05"), comm, event.TGID, event.PID, protocol, dstIP, dstPort, processPath, processHash)
+func printPipeEvent(now time.Time, comm string, event *types.ConnectionEvent, protocol, dstIP string, dstPort uint16, processPath, processHash, errorWarning string) {
+	fmt.Printf("%s|%s|%d|%d|%s|%s|%d|%s|%s|%s\n",
+		now.Format("2006-01-02 15:04:05"), comm, event.TGID, event.PID, protocol, dstIP, dstPort, processPath, processHash, errorWarning)
 }
 
 // intToIP converts a uint32 IP address to string

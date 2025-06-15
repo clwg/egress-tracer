@@ -26,6 +26,7 @@ struct connection_event {
     __u16 dst_port;
     __u8 protocol;
     char comm[16];
+    __u8 flags;
 };
 
 struct {
@@ -111,6 +112,7 @@ int trace_sys_enter_connect(struct trace_event_raw_sys_enter *ctx)
     struct sockaddr_in *addr;
     __u32 daddr = 0;
     __u16 dport = 0;
+    __u8 flags = 0;
     int sockfd;
     struct socket_info sockinfo = {.type = SOCK_STREAM, .protocol = IPPROTO_TCP}; // Default
 
@@ -138,19 +140,23 @@ int trace_sys_enter_connect(struct trace_event_raw_sys_enter *ctx)
     if (addr) {
         __u16 family;
         int ret = bpf_probe_read_user(&family, sizeof(family), &addr->sin_family);
-        if (ret != 0)
-            return 0;
-        if (family == AF_INET) {
+        if (ret != 0) {
+            flags |= (1 << 2); // FLAG_FAMILY_READ_FAILED
+        } else if (family == AF_INET) {
             ret = bpf_probe_read_user(&daddr, sizeof(daddr), &addr->sin_addr.s_addr);
-            if (ret != 0)
-                return 0;
+            if (ret != 0) {
+                flags |= (1 << 0); // FLAG_ADDR_READ_FAILED
+            }
             ret = bpf_probe_read_user(&dport, sizeof(dport), &addr->sin_port);
-            if (ret != 0)
-                return 0;
+            if (ret != 0) {
+                flags |= (1 << 1); // FLAG_PORT_READ_FAILED
+                dport = 0; // Explicitly set to 0 for failed reads
+            }
         }
     }
 
-    if (daddr == 0)
+    // Only skip if we couldn't read the destination address AND it's not a read failure
+    if (daddr == 0 && !(flags & ((1 << 0) | (1 << 2))))
         return 0;
 
     event = bpf_ringbuf_reserve(&events, sizeof(*event), 0);
@@ -163,6 +169,7 @@ int trace_sys_enter_connect(struct trace_event_raw_sys_enter *ctx)
     event->dst_addr = daddr;
     event->src_port = 0;
     event->dst_port = dport;
+    event->flags = flags;
     // Set protocol based on socket type and stored protocol
     if (sockinfo.type == SOCK_DGRAM) {
         event->protocol = IPPROTO_UDP;
@@ -192,104 +199,7 @@ int trace_sys_enter_close(struct trace_event_raw_sys_enter *ctx)
     return 0;
 }
 
-// Network-level tracepoint for more reliable protocol detection
-SEC("tracepoint/net/net_dev_start_xmit")
-int trace_net_dev_start_xmit(struct trace_event_raw_net_dev_start_xmit *ctx)
-{
-    struct connection_event *event;
-    struct sk_buff *skb = (struct sk_buff *)ctx->skbaddr;
-    __u64 pid_tgid;
-    __u32 pid, tgid;
-    
-    if (!skb)
-        return 0;
-        
-    pid_tgid = bpf_get_current_pid_tgid();
-    pid = pid_tgid;
-    tgid = pid_tgid >> 32;
-    
-    // Skip if this is kernel traffic (pid 0)
-    if (pid == 0)
-        return 0;
-    
-    // Try to extract protocol info from skb
-    __u16 protocol = 0;
-    int ret = bpf_probe_read_kernel(&protocol, sizeof(protocol), &skb->protocol);
-    if (ret != 0 || protocol != bpf_htons(0x0800)) // ETH_P_IP
-        return 0;
-    
-    // Get network header offset
-    __u16 network_header = 0;
-    ret = bpf_probe_read_kernel(&network_header, sizeof(network_header), &skb->network_header);
-    if (ret != 0)
-        return 0;
-    
-    // Get head pointer
-    unsigned char *head = NULL;
-    ret = bpf_probe_read_kernel(&head, sizeof(head), &skb->head);
-    if (ret != 0 || !head)
-        return 0;
-    
-    // Calculate IP header location
-    struct iphdr *iph = (struct iphdr *)(head + network_header);
-    
-    // Read IP header fields
-    __u8 ip_protocol = 0;
-    __u32 saddr = 0, daddr = 0;
-    ret = bpf_probe_read_kernel(&ip_protocol, sizeof(ip_protocol), &iph->protocol);
-    if (ret != 0) return 0;
-    ret = bpf_probe_read_kernel(&saddr, sizeof(saddr), &iph->saddr);
-    if (ret != 0) return 0;
-    ret = bpf_probe_read_kernel(&daddr, sizeof(daddr), &iph->daddr);
-    if (ret != 0) return 0;
-    
-    // Only track TCP, UDP, and ICMP
-    if (ip_protocol != IPPROTO_TCP && ip_protocol != IPPROTO_UDP && ip_protocol != IPPROTO_ICMP)
-        return 0;
-    
-    // Skip loopback traffic
-    if ((daddr & 0xFF) == 127) // 127.x.x.x
-        return 0;
-    
-    __u16 sport = 0, dport = 0;
-    
-    // Extract ports for TCP/UDP (ICMP doesn't have ports)
-    if (ip_protocol == IPPROTO_TCP || ip_protocol == IPPROTO_UDP) {
-        __u8 version_ihl = 0;
-        ret = bpf_probe_read_kernel(&version_ihl, sizeof(version_ihl), iph);
-        if (ret != 0) return 0;
-        
-        __u8 ihl = version_ihl & 0x0F; // Extract IHL from lower 4 bits
-        void *l4_header = (void *)iph + (ihl * 4);
-        
-        if (ip_protocol == IPPROTO_TCP) {
-            struct tcphdr *tcph = (struct tcphdr *)l4_header;
-            bpf_probe_read_kernel(&sport, sizeof(sport), &tcph->source);
-            bpf_probe_read_kernel(&dport, sizeof(dport), &tcph->dest);
-        } else { // UDP
-            struct udphdr *udph = (struct udphdr *)l4_header;
-            bpf_probe_read_kernel(&sport, sizeof(sport), &udph->source);
-            bpf_probe_read_kernel(&dport, sizeof(dport), &udph->dest);
-        }
-    }
-    
-    event = bpf_ringbuf_reserve(&events, sizeof(*event), 0);
-    if (!event)
-        return 0;
 
-    event->pid = pid;
-    event->tgid = tgid;
-    event->src_addr = saddr;
-    event->dst_addr = daddr;
-    event->src_port = sport;
-    event->dst_port = dport;
-    event->protocol = ip_protocol;
-    
-    bpf_get_current_comm(&event->comm, sizeof(event->comm));
-
-    bpf_ringbuf_submit(event, 0);
-    return 0;
-}
 
 SEC("tracepoint/syscalls/sys_enter_sendto")
 int trace_sys_enter_sendto(struct trace_event_raw_sys_enter *ctx)
@@ -300,6 +210,7 @@ int trace_sys_enter_sendto(struct trace_event_raw_sys_enter *ctx)
     struct sockaddr_in *addr;
     __u32 daddr = 0;
     __u16 dport = 0;
+    __u8 flags = 0;
     int sockfd;
     struct socket_info sockinfo = {.type = SOCK_DGRAM, .protocol = IPPROTO_UDP}; // Default
 
@@ -327,19 +238,23 @@ int trace_sys_enter_sendto(struct trace_event_raw_sys_enter *ctx)
     if (addr) {
         __u16 family;
         int ret = bpf_probe_read_user(&family, sizeof(family), &addr->sin_family);
-        if (ret != 0)
-            return 0;
-        if (family == AF_INET) {
+        if (ret != 0) {
+            flags |= (1 << 2); // FLAG_FAMILY_READ_FAILED
+        } else if (family == AF_INET) {
             ret = bpf_probe_read_user(&daddr, sizeof(daddr), &addr->sin_addr.s_addr);
-            if (ret != 0)
-                return 0;
+            if (ret != 0) {
+                flags |= (1 << 0); // FLAG_ADDR_READ_FAILED
+            }
             ret = bpf_probe_read_user(&dport, sizeof(dport), &addr->sin_port);
-            if (ret != 0)
-                return 0;
+            if (ret != 0) {
+                flags |= (1 << 1); // FLAG_PORT_READ_FAILED
+                dport = 0; // Explicitly set to 0 for failed reads
+            }
         }
     }
 
-    if (daddr == 0)
+    // Only skip if we couldn't read the destination address AND it's not a read failure
+    if (daddr == 0 && !(flags & ((1 << 0) | (1 << 2))))
         return 0;
 
     event = bpf_ringbuf_reserve(&events, sizeof(*event), 0);
@@ -352,6 +267,7 @@ int trace_sys_enter_sendto(struct trace_event_raw_sys_enter *ctx)
     event->dst_addr = daddr;
     event->src_port = 0;
     event->dst_port = dport;
+    event->flags = flags;
     // Set protocol based on socket type and stored protocol
     if (sockinfo.type == SOCK_DGRAM) {
         event->protocol = IPPROTO_UDP;
