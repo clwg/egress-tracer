@@ -212,8 +212,13 @@ func convertToEvent(connEvent *types.ConnectionEvent, processCache *cache.Proces
 	dstPort := binary.BigEndian.Uint16((*(*[2]byte)(unsafe.Pointer(&connEvent.DstPort)))[:])
 
 	protocol := "TCP"
-	if connEvent.Protocol == 17 { // IPPROTO_UDP
+	switch connEvent.Protocol {
+	case 1: // IPPROTO_ICMP
+		protocol = "ICMP"
+	case 17: // IPPROTO_UDP
 		protocol = "UDP"
+	default:
+		protocol = "TCP"
 	}
 
 	now := time.Now()
