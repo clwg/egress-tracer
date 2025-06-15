@@ -20,8 +20,7 @@ sudo apt install -y \
 ## Build
 
 ```bash
-# Build main binary
-make build
+make clean && make build && ./egress-tracer -h
 ```
 
 ## Usage (requires root privileges)
@@ -33,10 +32,15 @@ sudo ./egress-tracer
 # TUI mode (Terminal User Interface)
 sudo ./egress-tracer --tui
 
+# TUI with a whitelist and removing connections from view after 30 seconds
+sudo ./egress-tracer -whitelist whitelist.txt -tui -tui-cache-ttl 30s
+```
+
 # Options for CLI mode
-sudo ./egress-tracer --json                    # JSON output  
-sudo ./egress-tracer --cache-ttl=10m           # PID Cache TTL
-sudo ./egress-tracer --cache-max-size=500      # PID Cache size
+sudo ./egress-tracer --json                    # JSON output
+
+# Whitelist filtering (suppress output for specific processes)
+sudo ./egress-tracer --whitelist=whitelist.txt # Load SHA256 whitelist from file
 
 # Rotating JSONL Logging
 sudo ./egress-tracer --log-file=/var/log/egress-tracer.jsonl          # Enable rotating JSONL logging
@@ -44,8 +48,47 @@ sudo ./egress-tracer --log-file=/var/log/egress-tracer.jsonl \
                     --log-max-size=52428800 \                  # Max file size before rotation (50MB)
                     --log-max-files=10                         # Max number of rotated files
 
+# Process Cache which offloads /proc lookups
+sudo ./egress-tracer --cache-ttl=10m           # PID Cache TTL
+sudo ./egress-tracer --cache-max-size=500      # PID Cache size
 
 ```
+
+## Whitelist Filtering
+
+The whitelist feature allows you to suppress output for specific processes based on their SHA256 hash. Whitelist entries can be loaded from a file at startup or added interactively via the TUI.
+
+### Interactive TUI Management
+
+In TUI mode with `--whitelist` parameter, press `w` on any connection to add its process to the whitelist: **Requires starting with `--whitelist=filename`**. Changes are saved to the specified whitelist file and take effect immediately.
+
+### Whitelist File Format
+
+Create a text file with one SHA256 hash per line:
+
+```
+# Whitelist file for egress-tracer
+# Lines starting with # are comments
+# Empty lines are ignored
+
+d4f7c9e8a1b2c3d4e5f6789012345678901234567890123456789012345678901234
+a1b2c3d4e5f6789012345678901234567890123456789012345678901234567890123
+```
+
+### Usage Examples
+
+```bash
+# CLI mode with whitelist
+sudo ./egress-tracer --whitelist=trusted_processes.txt
+
+# TUI mode with whitelist (enables interactive 'w' key - requires --whitelist parameter)
+sudo ./egress-tracer --tui --whitelist=trusted_processes.txt
+
+# JSON logging with whitelist
+sudo ./egress-tracer --json --whitelist=trusted_processes.txt --log-file=events.jsonl
+```
+
+**Note**: If the whitelist file doesn't exist, you'll be prompted to create it automatically.
 
 ## Project Structure
 

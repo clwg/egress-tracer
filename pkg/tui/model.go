@@ -2,13 +2,16 @@ package tui
 
 import (
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/table"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/clwg/egress-tracer/pkg/cache"
 	"github.com/clwg/egress-tracer/pkg/types"
 )
 
@@ -25,6 +28,13 @@ const (
 	sortBySHA256
 )
 
+type popupType int
+
+const (
+	popupDetails popupType = iota
+	popupWhitelist
+)
+
 type ConnectionData struct {
 	Event     *types.Event
 	Count     int
@@ -33,20 +43,25 @@ type ConnectionData struct {
 }
 
 type Model struct {
-	table          table.Model
-	connections    map[string]*ConnectionData
-	sortBy         sortColumn
-	sortDesc       bool
-	totalEvents    int
-	startTime      time.Time
-	selectedRow    int
-	width          int
-	height         int
-	showPopup      bool
-	popupData      *ConnectionData
-	cacheMaxSize   int
-	cacheTTL       time.Duration
-	lastCleanup    time.Time
+	table               table.Model
+	connections         map[string]*ConnectionData
+	sortBy              sortColumn
+	sortDesc            bool
+	totalEvents         int
+	startTime           time.Time
+	selectedRow         int
+	width               int
+	height              int
+	showPopup           bool
+	popupType           popupType
+	popupData           *ConnectionData
+	cacheMaxSize        int
+	cacheTTL            time.Duration
+	lastCleanup         time.Time
+	processCache        *cache.ProcessCache
+	whitelistFile       string
+	whitelistInput      textinput.Model
+	whitelistConfirming bool
 }
 
 type EventMsg struct {
@@ -62,6 +77,10 @@ func tickCmd() tea.Cmd {
 }
 
 func NewModel(cacheMaxSize int, cacheTTL time.Duration) Model {
+	return NewModelWithCache(cacheMaxSize, cacheTTL, nil, "")
+}
+
+func NewModelWithCache(cacheMaxSize int, cacheTTL time.Duration, processCache *cache.ProcessCache, whitelistFile string) Model {
 	// Initialize with default column headers (will be updated dynamically)
 	columns := []table.Column{
 		{Title: "Process", Width: 19},
@@ -92,15 +111,24 @@ func NewModel(cacheMaxSize int, cacheTTL time.Duration) Model {
 		Bold(false)
 	t.SetStyles(s)
 
+	// Initialize text input for whitelist comments
+	ti := textinput.New()
+	ti.Placeholder = "Enter description for whitelist entry..."
+	ti.CharLimit = 100
+	ti.Width = 50
+
 	m := Model{
-		table:        t,
-		connections:  make(map[string]*ConnectionData),
-		sortBy:       sortByLastSeen,
-		sortDesc:     true,
-		startTime:    time.Now(),
-		cacheMaxSize: cacheMaxSize,
-		cacheTTL:     cacheTTL,
-		lastCleanup:  time.Now(),
+		table:          t,
+		connections:    make(map[string]*ConnectionData),
+		sortBy:         sortByLastSeen,
+		sortDesc:       true,
+		startTime:      time.Now(),
+		cacheMaxSize:   cacheMaxSize,
+		cacheTTL:       cacheTTL,
+		lastCleanup:    time.Now(),
+		processCache:   processCache,
+		whitelistFile:  whitelistFile,
+		whitelistInput: ti,
 	}
 
 	// Set initial column headers with sort indicators
@@ -138,91 +166,127 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tickCmd() // Schedule next tick
 
 	case tea.KeyMsg:
+		// Handle popup-specific keys first
+		if m.showPopup {
+			switch msg.String() {
+			case "q", "ctrl+c":
+				return m, tea.Quit
+
+			case "esc":
+				m.showPopup = false
+				m.popupType = popupDetails
+				m.popupData = nil
+				m.whitelistConfirming = false
+				m.whitelistInput.SetValue("")
+				m.whitelistInput.Blur()
+				return m, nil
+
+			case "enter":
+				if m.popupType == popupWhitelist && !m.whitelistConfirming {
+					// First enter - confirm the whitelist entry
+					m.whitelistConfirming = true
+					return m, nil
+				} else if m.popupType == popupWhitelist && m.whitelistConfirming {
+					// Second enter - actually add to whitelist
+					if err := m.addToWhitelist(); err != nil {
+						// TODO: Show error message - for now just close popup
+					}
+					m.showPopup = false
+					m.popupType = popupDetails
+					m.popupData = nil
+					m.whitelistConfirming = false
+					m.whitelistInput.SetValue("")
+					return m, nil
+				} else if m.popupType == popupDetails {
+					// Close details popup
+					m.showPopup = false
+					m.popupData = nil
+					return m, nil
+				}
+			}
+			// For whitelist popup, handle text input
+			if m.popupType == popupWhitelist {
+				m.whitelistInput, cmd = m.whitelistInput.Update(msg)
+				return m, cmd
+			}
+			// Other keys are ignored when popup is shown
+			return m, nil
+		}
+
+		// Handle main window keys only when no popup is shown
 		switch msg.String() {
 		case "q", "ctrl+c":
 			return m, tea.Quit
 
 		case "enter":
-			if !m.showPopup {
-				m.showPopup = true
-				m.popupData = m.getSelectedConnection()
-			}
+			m.showPopup = true
+			m.popupType = popupDetails
+			m.popupData = m.getSelectedConnection()
 			return m, nil
 
-		case "esc":
-			if m.showPopup {
-				m.showPopup = false
-				m.popupData = nil
+		case "w":
+			if m.whitelistFile != "" {
+				// Open whitelist popup for selected connection (only if whitelist is configured)
+				selectedData := m.getSelectedConnection()
+				if selectedData != nil && selectedData.Event.ProcessSHA256 != "" {
+					m.showPopup = true
+					m.popupType = popupWhitelist
+					m.popupData = selectedData
+					m.whitelistInput.Focus()
+				}
 			}
 			return m, nil
 
 		case "1":
-			if !m.showPopup {
-				m.sortBy = sortByProcess
-				m.sortDesc = !m.sortDesc
-				m.updateTable()
-			}
+			m.sortBy = sortByProcess
+			m.sortDesc = !m.sortDesc
+			m.updateTable()
 
 		case "2":
-			if !m.showPopup {
-				m.sortBy = sortByDestination
-				m.sortDesc = !m.sortDesc
-				m.updateTable()
-			}
+			m.sortBy = sortByDestination
+			m.sortDesc = !m.sortDesc
+			m.updateTable()
 
 		case "3":
-			if !m.showPopup {
-				m.sortBy = sortByPort
-				m.sortDesc = !m.sortDesc
-				m.updateTable()
-			}
+			m.sortBy = sortByPort
+			m.sortDesc = !m.sortDesc
+			m.updateTable()
 
 		case "4":
-			if !m.showPopup {
-				m.sortBy = sortByProtocol
-				m.sortDesc = !m.sortDesc
-				m.updateTable()
-			}
+			m.sortBy = sortByProtocol
+			m.sortDesc = !m.sortDesc
+			m.updateTable()
 
 		case "5":
-			if !m.showPopup {
-				m.sortBy = sortByFirstSeen
-				m.sortDesc = !m.sortDesc
-				m.updateTable()
-			}
+			m.sortBy = sortByFirstSeen
+			m.sortDesc = !m.sortDesc
+			m.updateTable()
 
 		case "6":
-			if !m.showPopup {
-				m.sortBy = sortByLastSeen
-				m.sortDesc = !m.sortDesc
-				m.updateTable()
-			}
+			m.sortBy = sortByLastSeen
+			m.sortDesc = !m.sortDesc
+			m.updateTable()
 
 		case "7":
-			if !m.showPopup {
-				m.sortBy = sortByCount
-				m.sortDesc = !m.sortDesc
-				m.updateTable()
-			}
+			m.sortBy = sortByCount
+			m.sortDesc = !m.sortDesc
+			m.updateTable()
 
 		case "8":
-			if !m.showPopup {
-				m.sortBy = sortBySHA256
-				m.sortDesc = !m.sortDesc
-				m.updateTable()
-			}
+			m.sortBy = sortBySHA256
+			m.sortDesc = !m.sortDesc
+			m.updateTable()
 
 		case "r":
-			if !m.showPopup {
-				// Refresh - clear all data
-				m.connections = make(map[string]*ConnectionData)
-				m.totalEvents = 0
-				m.startTime = time.Now()
-				m.updateTable()
-			}
+			// Refresh - clear all data
+			m.connections = make(map[string]*ConnectionData)
+			m.totalEvents = 0
+			m.startTime = time.Now()
+			m.updateTable()
 		}
 	}
 
+	// Update table only when no popup is shown
 	if !m.showPopup {
 		m.table, cmd = m.table.Update(msg)
 	}
@@ -231,7 +295,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *Model) View() string {
 	if m.showPopup && m.popupData != nil {
-		return m.renderPopup()
+		if m.popupType == popupWhitelist {
+			return m.renderWhitelistPopup()
+		}
+		return m.renderDetailsPopup()
 	}
 
 	var b strings.Builder
@@ -258,7 +325,13 @@ func (m *Model) View() string {
 		Foreground(lipgloss.Color("241")).
 		Padding(0, 1)
 
-	help := helpStyle.Render("Keys: 1-8 sort columns | r reset | enter details | q quit")
+	var helpText string
+	if m.whitelistFile != "" {
+		helpText = "Keys: 1-8 sort columns | enter details | w whitelist process | r reset | q quit"
+	} else {
+		helpText = "Keys: 1-8 sort columns | enter details | r reset | q quit"
+	}
+	help := helpStyle.Render(helpText)
 	b.WriteString(help + "\n\n")
 
 	// Table
@@ -412,7 +485,7 @@ func (m *Model) getSortedConnections() []*ConnectionData {
 	return connections
 }
 
-func (m *Model) renderPopup() string {
+func (m *Model) renderDetailsPopup() string {
 	data := m.popupData
 	if data == nil {
 		return ""
@@ -488,10 +561,116 @@ func (m *Model) renderPopup() string {
 	return lipgloss.Place(terminalWidth, terminalHeight, lipgloss.Center, lipgloss.Center, popup)
 }
 
-func SendEvent(event *types.Event) tea.Cmd {
-	return func() tea.Msg {
-		return EventMsg{Event: event}
+func (m *Model) renderWhitelistPopup() string {
+	if m.popupData == nil {
+		return ""
 	}
+
+	data := m.popupData
+	var content strings.Builder
+
+	// Title
+	titleStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("212")).
+		Bold(true)
+	content.WriteString(titleStyle.Render("Add to Whitelist"))
+	content.WriteString("\n\n")
+
+	// Show process information
+	labelStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("86")).
+		Bold(true)
+
+	valueStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("255"))
+
+	addField := func(label, value string) {
+		content.WriteString(labelStyle.Render(label+": ") + valueStyle.Render(value) + "\n")
+	}
+
+	addField("Process", data.Event.Process)
+	addField("Process Path", data.Event.ProcessPath)
+	addField("SHA256", data.Event.ProcessSHA256)
+	content.WriteString("\n")
+
+	// Description input
+	content.WriteString(labelStyle.Render("Description: "))
+	content.WriteString("\n")
+	content.WriteString(m.whitelistInput.View())
+	content.WriteString("\n\n")
+
+	// Instructions
+	helpStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("241")).
+		Italic(true)
+
+	if !m.whitelistConfirming {
+		content.WriteString(helpStyle.Render("Enter a description, then press ENTER to confirm"))
+	} else {
+		content.WriteString(helpStyle.Render("Press ENTER again to add to whitelist, or ESC to cancel"))
+	}
+
+	// Style the popup
+	popupStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("212")).
+		Padding(1, 2)
+
+	popup := popupStyle.Render(content.String())
+
+	// Center the popup
+	terminalWidth := m.width
+	terminalHeight := m.height
+
+	if terminalWidth == 0 {
+		terminalWidth = 80
+	}
+	if terminalHeight == 0 {
+		terminalHeight = 24
+	}
+
+	return lipgloss.Place(terminalWidth, terminalHeight, lipgloss.Center, lipgloss.Center, popup)
+}
+
+func (m *Model) addToWhitelist() error {
+	if m.popupData == nil || m.whitelistFile == "" {
+		return fmt.Errorf("no whitelist file configured")
+	}
+
+	data := m.popupData
+	description := strings.TrimSpace(m.whitelistInput.Value())
+	if description == "" {
+		description = "Added from TUI"
+	}
+
+	// Prepare the entry to append
+	var entry strings.Builder
+	entry.WriteString("\n")
+	entry.WriteString(fmt.Sprintf("# %s\n", description))
+	entry.WriteString(fmt.Sprintf("# Process: %s\n", data.Event.Process))
+	entry.WriteString(fmt.Sprintf("# Path: %s\n", data.Event.ProcessPath))
+	entry.WriteString(fmt.Sprintf("# Added: %s\n", time.Now().Format("2006-01-02 15:04:05")))
+	entry.WriteString(fmt.Sprintf("%s\n", data.Event.ProcessSHA256))
+
+	// Append to whitelist file
+	file, err := os.OpenFile(m.whitelistFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to open whitelist file: %w", err)
+	}
+	defer file.Close()
+
+	if _, err := file.WriteString(entry.String()); err != nil {
+		return fmt.Errorf("failed to write to whitelist file: %w", err)
+	}
+
+	// Update the process cache's whitelist filter
+	if m.processCache != nil {
+		if err := m.processCache.GetWhitelistFilter().AddHash(data.Event.ProcessSHA256); err != nil {
+			return fmt.Errorf("failed to add hash to filter: %w", err)
+		}
+	}
+
+	return nil
 }
 
 // evictCacheIfNeeded performs size-based cache eviction (time-based is handled by timer)
