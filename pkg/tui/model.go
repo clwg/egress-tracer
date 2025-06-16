@@ -91,8 +91,8 @@ func NewModelWithCacheAndTheme(cacheMaxSize int, cacheTTL time.Duration, process
 	columns := []table.Column{
 		{Title: "Process", Width: 19},
 		{Title: "Destination", Width: 18},
-		{Title: "Port", Width: 8},
-		{Title: "Proto", Width: 10},
+		{Title: "Port", Width: 12},
+		{Title: "Proto", Width: 14},
 		{Title: "First Seen", Width: 20},
 		{Title: "Last Seen", Width: 20},
 		{Title: "Count", Width: 20},
@@ -396,7 +396,7 @@ func (m *Model) updateTable() {
 
 func (m *Model) updateColumnHeaders() {
 	baseColumns := []string{"Process", "Destination", "Port", "Proto", "First Seen", "Last Seen", "Count", "SHA256"}
-	widths := []int{19, 18, 8, 10, 20, 20, 20, 20}
+	widths := []int{19, 18, 12, 14, 20, 20, 20, 20}
 
 	columns := make([]table.Column, len(baseColumns))
 	for i, title := range baseColumns {
