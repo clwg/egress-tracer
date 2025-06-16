@@ -529,59 +529,70 @@ func (m *Model) renderDetailsPopup() string {
 	// Build content with consistent formatting
 	var content strings.Builder
 
-	// Title
+	// Title with border separator
 	titleStyle := lipgloss.NewStyle().
 		Foreground(m.theme.PopupLabelForeground).
 		Background(m.theme.PopupBackground).
 		Bold(true).
-		Underline(true)
+		Align(lipgloss.Center)
 
 	content.WriteString(titleStyle.Render("Connection Details"))
+	content.WriteString("\n")
+	
+	// Add a separator line
+	separatorStyle := lipgloss.NewStyle().
+		Foreground(m.theme.DetailsPopupBorder).
+		Background(m.theme.PopupBackground)
+	content.WriteString(separatorStyle.Render(strings.Repeat("─", 50)))
 	content.WriteString("\n\n")
 
-	// Helper function to add a field
+	// Helper function to add a field with better spacing
 	addField := func(label, value string) {
-		// Render the label part with label styling, value part with value styling
-		labelPart := labelStyle.Render(fmt.Sprintf("%-16s ", label+":"))
+		labelPart := labelStyle.Render(fmt.Sprintf("%-14s:", label))
 		valuePart := valueStyle.Render(value)
-		
-		content.WriteString(labelPart + valuePart + "\n")
+		content.WriteString(labelPart + " " + valuePart + "\n")
 	}
 
-	// Add all fields
+	// Add all fields in a more organized layout
 	addField("Process", data.Event.Process)
 	addField("PID", fmt.Sprintf("%d", data.Event.PID))
 	addField("TGID", fmt.Sprintf("%d", data.Event.TGID))
 	addField("Destination", data.Event.Destination)
 	addField("Port", fmt.Sprintf("%d", data.Event.Port))
 	addField("Protocol", data.Event.Protocol)
+	
+	content.WriteString("\n")
 	addField("Process Path", data.Event.ProcessPath)
-	addField("Process SHA256", data.Event.ProcessSHA256)
+	addField("Process SHA256", truncate(data.Event.ProcessSHA256, 40))
+	
+	content.WriteString("\n")
 	addField("First Seen", data.FirstSeen.Format("2006-01-02 15:04:05"))
 	addField("Last Seen", data.LastSeen.Format("2006-01-02 15:04:05"))
 	addField("Count", fmt.Sprintf("%d", data.Count))
 
-	// Add help text
+	// Add help section with better formatting
 	content.WriteString("\n")
+	content.WriteString(separatorStyle.Render(strings.Repeat("─", 50)))
+	content.WriteString("\n")
+	
 	helpStyle := lipgloss.NewStyle().
 		Foreground(m.theme.HelpForeground).
 		Background(m.theme.PopupBackground).
-		Italic(true)
+		Align(lipgloss.Center)
 	
-	var helpText string
 	if m.whitelistFile != "" && data.Event.ProcessSHA256 != "" {
-		helpText = "Press W to whitelist process | ESC to close"
+		content.WriteString(helpStyle.Render("Press [W] to whitelist process  •  [ESC] to close"))
 	} else {
-		helpText = "Press ESC to close"
+		content.WriteString(helpStyle.Render("Press [ESC] to close"))
 	}
-	content.WriteString(helpStyle.Render(helpText))
 
-	// Style the popup
+	// Style the popup with increased width for better text flow
 	popupStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(m.theme.DetailsPopupBorder).
 		Background(m.theme.PopupBackground).
-		Padding(1, 2)
+		Padding(1, 3).
+		Width(56)
 
 	popup := popupStyle.Render(content.String())
 
