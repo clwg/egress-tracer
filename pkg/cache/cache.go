@@ -17,7 +17,7 @@ import (
 type ProcessCache struct {
 	cache           *lru.LRU[uint32, *types.ProcessInfo]
 	ttl             time.Duration
-	whitelistFilter *filter.WhitelistFilter
+	processFilter *filter.ProcessFilter
 }
 
 // NewProcessCache creates a new process cache with the specified TTL and max size
@@ -26,27 +26,27 @@ func NewProcessCache(ttl time.Duration, maxSize int) *ProcessCache {
 	return &ProcessCache{
 		cache:           cache,
 		ttl:             ttl,
-		whitelistFilter: filter.NewWhitelistFilter(),
+		processFilter: filter.NewProcessFilter(),
 	}
 }
 
-// NewProcessCacheWithFilter creates a new process cache with a whitelist filter
-func NewProcessCacheWithFilter(ttl time.Duration, maxSize int, whitelistFilter *filter.WhitelistFilter) *ProcessCache {
+// NewProcessCacheWithFilter creates a new process cache with a process filter
+func NewProcessCacheWithFilter(ttl time.Duration, maxSize int, processFilter *filter.ProcessFilter) *ProcessCache {
 	cache := lru.NewLRU[uint32, *types.ProcessInfo](maxSize, nil, ttl)
 	return &ProcessCache{
 		cache:           cache,
 		ttl:             ttl,
-		whitelistFilter: whitelistFilter,
+		processFilter: processFilter,
 	}
 }
 
 // GetProcessInfo retrieves process information for a PID, caching it if not present
-// Returns nil if the process is whitelisted (should be filtered out)
+// Returns nil if the process is filtered (should be filtered out)
 func (pc *ProcessCache) GetProcessInfo(pid uint32) *types.ProcessInfo {
 	// Check if we have cached info
 	if info, ok := pc.cache.Get(pid); ok {
-		// If it's whitelisted, return nil to indicate it should be filtered
-		if pc.whitelistFilter.IsWhitelisted(info.SHA256) {
+		// If it's filtered, return nil to indicate it should be filtered
+		if pc.processFilter.IsFiltered(info.SHA256) {
 			return nil
 		}
 		return info
@@ -55,8 +55,8 @@ func (pc *ProcessCache) GetProcessInfo(pid uint32) *types.ProcessInfo {
 	// Fetch new process info
 	newInfo := pc.fetchProcessInfo(pid)
 	if newInfo != nil {
-		// Check if the process is whitelisted before caching
-		if pc.whitelistFilter.IsWhitelisted(newInfo.SHA256) {
+		// Check if the process is filtered before caching
+		if pc.processFilter.IsFiltered(newInfo.SHA256) {
 			// Still cache it, but return nil to indicate filtering
 			pc.cache.Add(pid, newInfo)
 			return nil
@@ -109,12 +109,12 @@ func (pc *ProcessCache) CleanExpired() {
 	// Expirable LRU handles TTL automatically, no manual cleanup needed
 }
 
-// GetWhitelistFilter returns the whitelist filter for runtime management
-func (pc *ProcessCache) GetWhitelistFilter() *filter.WhitelistFilter {
-	return pc.whitelistFilter
+// GetProcessFilter returns the process filter for runtime management
+func (pc *ProcessCache) GetProcessFilter() *filter.ProcessFilter {
+	return pc.processFilter
 }
 
-// LoadWhitelistFromFile loads whitelist from a file
-func (pc *ProcessCache) LoadWhitelistFromFile(filePath string) error {
-	return pc.whitelistFilter.LoadFromFile(filePath)
+// LoadFilterFromFile loads filter from a file
+func (pc *ProcessCache) LoadFilterFromFile(filePath string) error {
+	return pc.processFilter.LoadFromFile(filePath)
 }

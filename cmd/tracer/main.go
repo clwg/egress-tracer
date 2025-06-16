@@ -44,8 +44,8 @@ func main() {
 	logMaxSize := flag.Int64("log-max-size", 100*1024*1024, "Maximum size of log file before rotation (bytes)")
 	logMaxFiles := flag.Int("log-max-files", 5, "Maximum number of rotated log files to keep")
 
-	// Whitelist filter options
-	whitelistFile := flag.String("whitelist", "", "Path to whitelist file containing SHA256 hashes (one per line)")
+	// Process filter options
+	filterFile := flag.String("filter", "", "Path to filter file containing SHA256 hashes (one per line)")
 
 	// Theme options
 	themeName := flag.String("theme", "dark", fmt.Sprintf("TUI theme (%s)", strings.Join(theme.GetAvailableThemes(), ", ")))
@@ -53,23 +53,23 @@ func main() {
 	flag.Parse()
 
 	if *tuiMode {
-		runTUI(*cacheTTL, *cacheMaxSize, *tuiCacheMaxSize, *tuiCacheTTL, *whitelistFile, *themeName)
+		runTUI(*cacheTTL, *cacheMaxSize, *tuiCacheMaxSize, *tuiCacheTTL, *filterFile, *themeName)
 		return
 	}
 
 	// Initialize process cache with LRU and TTL
 	processCache := cache.NewProcessCache(*cacheTTL, *cacheMaxSize)
 
-	// Load whitelist if specified
-	if *whitelistFile != "" {
-		if err := processCache.LoadWhitelistFromFile(*whitelistFile); err != nil {
+	// Load filter if specified
+	if *filterFile != "" {
+		if err := processCache.LoadFilterFromFile(*filterFile); err != nil {
 			var fileNotExistErr *filter.FileNotExistError
 			if errors.As(err, &fileNotExistErr) {
-				log.Fatalf("Whitelist file does not exist: %s\nPlease create the file or use --whitelist=\"\" to disable filtering.", *whitelistFile)
+				log.Fatalf("Filter file does not exist: %s\nPlease create the file or use --filter=\"\" to disable filtering.", *filterFile)
 			}
-			log.Fatalf("Loading whitelist file: %v", err)
+			log.Fatalf("Loading filter file: %v", err)
 		}
-		log.Printf("Loaded whitelist from %s (%d hashes)", *whitelistFile, processCache.GetWhitelistFilter().GetHashCount())
+		log.Printf("Loaded filter from %s (%d hashes)", *filterFile, processCache.GetProcessFilter().GetHashCount())
 	}
 
 	// Initialize rotating logger if log file is specified
@@ -142,8 +142,8 @@ func main() {
 			continue
 		}
 
-		// Check if process is whitelisted (filtered out) by attempting to get process info
-		// If GetProcessInfo returns nil, the process is whitelisted and should be dropped
+		// Check if process is filtered (filtered out) by attempting to get process info
+		// If GetProcessInfo returns nil, the process is filtered and should be dropped
 		if processCache.GetProcessInfo(event.PID) == nil {
 			continue // Drop the event silently
 		}
@@ -152,7 +152,7 @@ func main() {
 	}
 }
 
-func runTUI(cacheTTL time.Duration, cacheMaxSize int, tuiCacheMaxSize int, tuiCacheTTL time.Duration, whitelistFile string, themeName string) {
+func runTUI(cacheTTL time.Duration, cacheMaxSize int, tuiCacheMaxSize int, tuiCacheTTL time.Duration, filterFile string, themeName string) {
 	// Validate and get theme
 	selectedTheme, exists := theme.GetTheme(themeName)
 	if !exists {
@@ -161,36 +161,36 @@ func runTUI(cacheTTL time.Duration, cacheMaxSize int, tuiCacheMaxSize int, tuiCa
 	// Initialize process cache with LRU and TTL
 	processCache := cache.NewProcessCache(cacheTTL, cacheMaxSize)
 
-	// Load whitelist if specified
-	if whitelistFile != "" {
-		if err := processCache.LoadWhitelistFromFile(whitelistFile); err != nil {
+	// Load filter if specified
+	if filterFile != "" {
+		if err := processCache.LoadFilterFromFile(filterFile); err != nil {
 			var fileNotExistErr *filter.FileNotExistError
 			if errors.As(err, &fileNotExistErr) {
 				// Prompt user to create the file
-				fmt.Printf("Whitelist file does not exist: %s\n", whitelistFile)
+				fmt.Printf("Filter file does not exist: %s\n", filterFile)
 				fmt.Print("Would you like to create it? (y/N): ")
 				
 				var response string
 				fmt.Scanln(&response)
 				
 				if strings.ToLower(strings.TrimSpace(response)) == "y" {
-					if err := filter.CreateWhitelistFile(whitelistFile); err != nil {
-						log.Fatalf("Failed to create whitelist file: %v", err)
+					if err := filter.CreateFilterFile(filterFile); err != nil {
+						log.Fatalf("Failed to create filter file: %v", err)
 					}
-					fmt.Printf("Created whitelist file: %s\n", whitelistFile)
+					fmt.Printf("Created filter file: %s\n", filterFile)
 					// Load the newly created file
-					if err := processCache.LoadWhitelistFromFile(whitelistFile); err != nil {
-						log.Fatalf("Failed to load newly created whitelist file: %v", err)
+					if err := processCache.LoadFilterFromFile(filterFile); err != nil {
+						log.Fatalf("Failed to load newly created filter file: %v", err)
 					}
 				} else {
-					fmt.Println("Continuing without whitelist filtering...")
-					whitelistFile = "" // Disable whitelist
+					fmt.Println("Continuing without process filtering...")
+					filterFile = "" // Disable filter
 				}
 			} else {
-				log.Fatalf("Loading whitelist file: %v", err)
+				log.Fatalf("Loading filter file: %v", err)
 			}
 		} else {
-			log.Printf("Loaded whitelist from %s (%d hashes)", whitelistFile, processCache.GetWhitelistFilter().GetHashCount())
+			log.Printf("Loaded filter from %s (%d hashes)", filterFile, processCache.GetProcessFilter().GetHashCount())
 		}
 	}
 
@@ -202,7 +202,7 @@ func runTUI(cacheTTL time.Duration, cacheMaxSize int, tuiCacheMaxSize int, tuiCa
 	defer tracer.Close()
 
 	// Initialize TUI model with theme
-	model := tui.NewModelWithCacheAndTheme(tuiCacheMaxSize, tuiCacheTTL, processCache, whitelistFile, selectedTheme)
+	model := tui.NewModelWithCacheAndTheme(tuiCacheMaxSize, tuiCacheTTL, processCache, filterFile, selectedTheme)
 
 	// Create context for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
@@ -252,8 +252,8 @@ func runTUI(cacheTTL time.Duration, cacheMaxSize int, tuiCacheMaxSize int, tuiCa
 					continue
 				}
 
-				// Check if process is whitelisted (filtered out)
-				// If GetProcessInfo returns nil, the process is whitelisted and should be dropped
+				// Check if process is filtered (filtered out)
+				// If GetProcessInfo returns nil, the process is filtered and should be dropped
 				if processCache.GetProcessInfo(event.PID) == nil {
 					continue // Drop the event silently
 				}

@@ -21,9 +21,9 @@ $(VMLINUX):
 generate: $(VMLINUX)
 	$(GO) generate ./...
 
-# Build the main Go binary (cmd/procnet)
+# Build the main Go binary (cmd/tracer)
 build: generate
-	$(GO) build -o $(TARGET) ./cmd/procnet
+	$(GO) build -o $(TARGET) ./cmd/tracer
 
 $(TARGET): build
 
