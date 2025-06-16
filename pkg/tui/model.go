@@ -90,12 +90,12 @@ func NewModelWithCacheAndTheme(cacheMaxSize int, cacheTTL time.Duration, process
 	// Initialize with default column headers (will be updated dynamically)
 	columns := []table.Column{
 		{Title: "Process", Width: 19},
-		{Title: "Destination", Width: 22},
-		{Title: "Port", Width: 12},
-		{Title: "Protocol", Width: 15},
-		{Title: "First Seen", Width: 18},
-		{Title: "Last Seen", Width: 17},
-		{Title: "Count", Width: 12},
+		{Title: "Destination", Width: 18},
+		{Title: "Port", Width: 8},
+		{Title: "Proto", Width: 10},
+		{Title: "First Seen", Width: 20},
+		{Title: "Last Seen", Width: 20},
+		{Title: "Count", Width: 20},
 		{Title: "SHA256", Width: 20},
 	}
 
@@ -395,8 +395,8 @@ func (m *Model) updateTable() {
 }
 
 func (m *Model) updateColumnHeaders() {
-	baseColumns := []string{"Process", "Destination", "Port", "Protocol", "First Seen", "Last Seen", "Count", "SHA256"}
-	widths := []int{19, 22, 12, 15, 19, 19, 12, 20}
+	baseColumns := []string{"Process", "Destination", "Port", "Proto", "First Seen", "Last Seen", "Count", "SHA256"}
+	widths := []int{19, 18, 8, 10, 20, 20, 20, 20}
 
 	columns := make([]table.Column, len(baseColumns))
 	for i, title := range baseColumns {
@@ -426,7 +426,7 @@ func (m *Model) getSortedRows() []table.Row {
 		}
 		rows = append(rows, table.Row{
 			truncate(conn.Event.Process, 14),
-			truncate(conn.Event.Destination, 17),
+			conn.Event.Destination,
 			fmt.Sprintf("%d", conn.Event.Port),
 			conn.Event.Protocol,
 			conn.FirstSeen.Format("2006-01-02 15:04:05"),

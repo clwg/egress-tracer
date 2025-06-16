@@ -67,7 +67,7 @@ The whitelist feature allows you to suppress output for specific processes based
 
 ### Interactive TUI Management
 
-In TUI mode with `--whitelist` parameter, press `w` on any connection to add its process to the whitelist: **Requires starting with `--whitelist=filename`**. Changes are saved to the specified whitelist file and take effect immediately.
+In TUI mode with `--whitelist` parameter, press `w` within the connection details screen: **Requires starting with `--whitelist=filename`**. Changes are saved to the specified whitelist file and take effect immediately.
 
 ### Whitelist File Format
 
