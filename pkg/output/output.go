@@ -71,7 +71,7 @@ func PrintEventWithLogger(event *types.ConnectionEvent, isTerminal, jsonOutput b
 	if jsonOutput {
 		printJSONEvent(now, comm, event, protocol, dstIP, dstPort, processPath, processHash, errorWarning, rotatingLogger)
 	} else if isTerminal {
-		printTerminalEvent(now, comm, event, protocol, dstIP, dstPort, processPath, errorWarning)
+		printTerminalEvent(now, comm, event, protocol, dstIP, dstPort, processPath, processHash, errorWarning)
 	} else {
 		printPipeEvent(now, comm, event, protocol, dstIP, dstPort, processPath, processHash, errorWarning)
 	}
@@ -105,20 +105,23 @@ func printJSONEvent(now time.Time, comm string, event *types.ConnectionEvent, pr
 }
 
 // printTerminalEvent outputs colored terminal event
-func printTerminalEvent(now time.Time, comm string, event *types.ConnectionEvent, protocol, dstIP string, dstPort uint16, processPath, errorWarning string) {
-	if processPath != "" {
-		fmt.Printf("[%s] \033[1;36m%-12s\033[0m (PID: \033[1;33m%d\033[0m, Path: \033[1;34m%s\033[0m) \033[1;32m%s\033[0m connection to \033[1;35m%s:%d\033[0m%s\n",
-			now.Format("15:04:05"), comm, event.PID, processPath, protocol, dstIP, dstPort, errorWarning)
+func printTerminalEvent(now time.Time, comm string, event *types.ConnectionEvent, protocol, dstIP string, dstPort uint16, processPath, processHash, errorWarning string) {
+	if processPath != "" && processHash != "" {
+		fmt.Printf("[%s] \033[1;36m%-12s\033[0m TGID:\033[1;33m%d\033[0m PID:\033[1;33m%d\033[0m \033[1;32m%s\033[0m → \033[1;35m%s:%d\033[0m Path:\033[1;34m%s\033[0m Hash:\033[1;90m%s\033[0m%s\n",
+			now.Format("15:04:05"), comm, event.TGID, event.PID, protocol, dstIP, dstPort, processPath, processHash, errorWarning)
+	} else if processPath != "" {
+		fmt.Printf("[%s] \033[1;36m%-12s\033[0m TGID:\033[1;33m%d\033[0m PID:\033[1;33m%d\033[0m \033[1;32m%s\033[0m → \033[1;35m%s:%d\033[0m Path:\033[1;34m%s\033[0m%s\n",
+			now.Format("15:04:05"), comm, event.TGID, event.PID, protocol, dstIP, dstPort, processPath, errorWarning)
 	} else {
-		fmt.Printf("[%s] \033[1;36m%-12s\033[0m (PID: \033[1;33m%d\033[0m) \033[1;32m%s\033[0m connection to \033[1;35m%s:%d\033[0m%s\n",
-			now.Format("15:04:05"), comm, event.PID, protocol, dstIP, dstPort, errorWarning)
+		fmt.Printf("[%s] \033[1;36m%-12s\033[0m TGID:\033[1;33m%d\033[0m PID:\033[1;33m%d\033[0m \033[1;32m%s\033[0m → \033[1;35m%s:%d\033[0m%s\n",
+			now.Format("15:04:05"), comm, event.TGID, event.PID, protocol, dstIP, dstPort, errorWarning)
 	}
 }
 
 // printPipeEvent outputs machine-parsable pipe-delimited event
 func printPipeEvent(now time.Time, comm string, event *types.ConnectionEvent, protocol, dstIP string, dstPort uint16, processPath, processHash, errorWarning string) {
 	fmt.Printf("%s|%s|%d|%d|%s|%s|%d|%s|%s|%s\n",
-		now.Format("2006-01-02 15:04:05"), comm, event.TGID, event.PID, protocol, dstIP, dstPort, processPath, processHash, errorWarning)
+		now.Format("2006-01-02 15:04:05"), comm, event.PID, event.TGID, protocol, dstIP, dstPort, processPath, processHash, errorWarning)
 }
 
 // intToIP converts a uint32 IP address to string
