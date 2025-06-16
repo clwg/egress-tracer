@@ -90,12 +90,12 @@ func NewModelWithCacheAndTheme(cacheMaxSize int, cacheTTL time.Duration, process
 	// Initialize with default column headers (will be updated dynamically)
 	columns := []table.Column{
 		{Title: "Process", Width: 19},
-		{Title: "Destination", Width: 22},
-		{Title: "Port", Width: 12},
-		{Title: "Protocol", Width: 15},
-		{Title: "First Seen", Width: 18},
-		{Title: "Last Seen", Width: 17},
-		{Title: "Count", Width: 12},
+		{Title: "Destination", Width: 18},
+		{Title: "Port", Width: 8},
+		{Title: "Proto", Width: 10},
+		{Title: "First Seen", Width: 20},
+		{Title: "Last Seen", Width: 20},
+		{Title: "Count", Width: 20},
 		{Title: "SHA256", Width: 20},
 	}
 
@@ -184,9 +184,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				case "ctrl+c":
 					return m, tea.Quit
 				case "esc":
-					m.showPopup = false
+					// Return to connection details popup
 					m.popupType = popupDetails
-					m.popupData = nil
 					m.whitelistConfirming = false
 					m.whitelistInput.SetValue("")
 					m.whitelistInput.Blur()
@@ -199,13 +198,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					} else {
 						// Second enter - actually add to whitelist
 						if err := m.addToWhitelist(); err != nil {
-							// TODO: Show error message - for now just close popup
+							// TODO: Show error message - for now return to details popup
 						}
-						m.showPopup = false
+						// Return to connection details popup after successful whitelist
 						m.popupType = popupDetails
-						m.popupData = nil
 						m.whitelistConfirming = false
 						m.whitelistInput.SetValue("")
+						m.whitelistInput.Blur()
 						return m, nil
 					}
 				default:
@@ -221,13 +220,28 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 
 			case "q", "esc":
-				m.showPopup = false
-				m.popupType = popupDetails
-				m.popupData = nil
-				m.whitelistConfirming = false
-				m.whitelistInput.SetValue("")
-				m.whitelistInput.Blur()
+				if m.popupType == popupWhitelist {
+					// Return to connection details popup from whitelist popup
+					m.popupType = popupDetails
+					m.whitelistConfirming = false
+					m.whitelistInput.SetValue("")
+					m.whitelistInput.Blur()
+				} else {
+					// Close popup entirely
+					m.showPopup = false
+					m.popupData = nil
+				}
 				return m, nil
+
+			case "w":
+				if m.popupType == popupDetails && m.whitelistFile != "" {
+					// Open whitelist popup from details popup
+					if m.popupData != nil && m.popupData.Event.ProcessSHA256 != "" {
+						m.popupType = popupWhitelist
+						m.whitelistInput.Focus()
+					}
+					return m, nil
+				}
 
 			case "enter":
 				if m.popupType == popupDetails {
@@ -252,18 +266,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.popupData = m.getSelectedConnection()
 			return m, nil
 
-		case "w":
-			if m.whitelistFile != "" {
-				// Open whitelist popup for selected connection (only if whitelist is configured)
-				selectedData := m.getSelectedConnection()
-				if selectedData != nil && selectedData.Event.ProcessSHA256 != "" {
-					m.showPopup = true
-					m.popupType = popupWhitelist
-					m.popupData = selectedData
-					m.whitelistInput.Focus()
-				}
-			}
-			return m, nil
 
 		case "1":
 			m.sortBy = sortByProcess
@@ -353,12 +355,7 @@ func (m *Model) View() string {
 		Foreground(m.theme.HelpForeground).
 		Padding(0, 1)
 
-	var helpText string
-	if m.whitelistFile != "" {
-		helpText = "Keys: 1-8 sort columns | enter details | w whitelist process | r reset | q quit"
-	} else {
-		helpText = "Keys: 1-8 sort columns | enter details | r reset | q quit"
-	}
+	helpText := "Keys: 1-8 sort columns | enter details | r reset | q quit"
 	help := helpStyle.Render(helpText)
 	b.WriteString(help + "\n\n")
 
@@ -398,8 +395,8 @@ func (m *Model) updateTable() {
 }
 
 func (m *Model) updateColumnHeaders() {
-	baseColumns := []string{"Process", "Destination", "Port", "Protocol", "First Seen", "Last Seen", "Count", "SHA256"}
-	widths := []int{19, 22, 12, 15, 19, 19, 12, 20}
+	baseColumns := []string{"Process", "Destination", "Port", "Proto", "First Seen", "Last Seen", "Count", "SHA256"}
+	widths := []int{19, 18, 8, 10, 20, 20, 20, 20}
 
 	columns := make([]table.Column, len(baseColumns))
 	for i, title := range baseColumns {
@@ -429,7 +426,7 @@ func (m *Model) getSortedRows() []table.Row {
 		}
 		rows = append(rows, table.Row{
 			truncate(conn.Event.Process, 14),
-			truncate(conn.Event.Destination, 17),
+			conn.Event.Destination,
 			fmt.Sprintf("%d", conn.Event.Port),
 			conn.Event.Protocol,
 			conn.FirstSeen.Format("2006-01-02 15:04:05"),
@@ -532,52 +529,70 @@ func (m *Model) renderDetailsPopup() string {
 	// Build content with consistent formatting
 	var content strings.Builder
 
-	// Title
+	// Title with border separator
 	titleStyle := lipgloss.NewStyle().
 		Foreground(m.theme.PopupLabelForeground).
 		Background(m.theme.PopupBackground).
 		Bold(true).
-		Underline(true)
+		Align(lipgloss.Center)
 
 	content.WriteString(titleStyle.Render("Connection Details"))
+	content.WriteString("\n")
+	
+	// Add a separator line
+	separatorStyle := lipgloss.NewStyle().
+		Foreground(m.theme.DetailsPopupBorder).
+		Background(m.theme.PopupBackground)
+	content.WriteString(separatorStyle.Render(strings.Repeat("─", 50)))
 	content.WriteString("\n\n")
 
-	// Helper function to add a field
+	// Helper function to add a field with better spacing
 	addField := func(label, value string) {
-		// Render the label part with label styling, value part with value styling
-		labelPart := labelStyle.Render(fmt.Sprintf("%-16s ", label+":"))
+		labelPart := labelStyle.Render(fmt.Sprintf("%-14s:", label))
 		valuePart := valueStyle.Render(value)
-		
-		content.WriteString(labelPart + valuePart + "\n")
+		content.WriteString(labelPart + " " + valuePart + "\n")
 	}
 
-	// Add all fields
+	// Add all fields in a more organized layout
 	addField("Process", data.Event.Process)
 	addField("PID", fmt.Sprintf("%d", data.Event.PID))
 	addField("TGID", fmt.Sprintf("%d", data.Event.TGID))
 	addField("Destination", data.Event.Destination)
 	addField("Port", fmt.Sprintf("%d", data.Event.Port))
 	addField("Protocol", data.Event.Protocol)
+	
+	content.WriteString("\n")
 	addField("Process Path", data.Event.ProcessPath)
-	addField("Process SHA256", data.Event.ProcessSHA256)
+	addField("Process SHA256", truncate(data.Event.ProcessSHA256, 40))
+	
+	content.WriteString("\n")
 	addField("First Seen", data.FirstSeen.Format("2006-01-02 15:04:05"))
 	addField("Last Seen", data.LastSeen.Format("2006-01-02 15:04:05"))
 	addField("Count", fmt.Sprintf("%d", data.Count))
 
-	// Add help text
+	// Add help section with better formatting
 	content.WriteString("\n")
+	content.WriteString(separatorStyle.Render(strings.Repeat("─", 50)))
+	content.WriteString("\n")
+	
 	helpStyle := lipgloss.NewStyle().
 		Foreground(m.theme.HelpForeground).
 		Background(m.theme.PopupBackground).
-		Italic(true)
-	content.WriteString(helpStyle.Render("Press ESC to close"))
+		Align(lipgloss.Center)
+	
+	if m.whitelistFile != "" && data.Event.ProcessSHA256 != "" {
+		content.WriteString(helpStyle.Render("Press [W] to whitelist process  •  [ESC] to close"))
+	} else {
+		content.WriteString(helpStyle.Render("Press [ESC] to close"))
+	}
 
-	// Style the popup
+	// Style the popup with increased width for better text flow
 	popupStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(m.theme.DetailsPopupBorder).
 		Background(m.theme.PopupBackground).
-		Padding(1, 2)
+		Padding(1, 3).
+		Width(56)
 
 	popup := popupStyle.Render(content.String())
 
