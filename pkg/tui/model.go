@@ -563,7 +563,7 @@ func (m *Model) renderDetailsPopup() string {
 	
 	content.WriteString("\n")
 	addField("Process Path", data.Event.ProcessPath)
-	addField("Process SHA256", truncate(data.Event.ProcessSHA256, 40))
+	addField("Process SHA256", data.Event.ProcessSHA256)
 	
 	content.WriteString("\n")
 	addField("First Seen", data.FirstSeen.Format("2006-01-02 15:04:05"))
