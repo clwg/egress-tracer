@@ -33,7 +33,7 @@ type popupType int
 
 const (
 	popupDetails popupType = iota
-	popupWhitelist
+	popupFilter
 )
 
 type ConnectionData struct {
@@ -60,9 +60,9 @@ type Model struct {
 	cacheTTL            time.Duration
 	lastCleanup         time.Time
 	processCache        *cache.ProcessCache
-	whitelistFile       string
-	whitelistInput      textinput.Model
-	whitelistConfirming bool
+	filterFile       string
+	filterInput      textinput.Model
+	filterConfirming bool
 	theme               theme.Theme
 }
 
@@ -82,11 +82,11 @@ func NewModel(cacheMaxSize int, cacheTTL time.Duration) Model {
 	return NewModelWithCache(cacheMaxSize, cacheTTL, nil, "")
 }
 
-func NewModelWithCache(cacheMaxSize int, cacheTTL time.Duration, processCache *cache.ProcessCache, whitelistFile string) Model {
-	return NewModelWithCacheAndTheme(cacheMaxSize, cacheTTL, processCache, whitelistFile, theme.GetDefaultTheme())
+func NewModelWithCache(cacheMaxSize int, cacheTTL time.Duration, processCache *cache.ProcessCache, filterFile string) Model {
+	return NewModelWithCacheAndTheme(cacheMaxSize, cacheTTL, processCache, filterFile, theme.GetDefaultTheme())
 }
 
-func NewModelWithCacheAndTheme(cacheMaxSize int, cacheTTL time.Duration, processCache *cache.ProcessCache, whitelistFile string, selectedTheme theme.Theme) Model {
+func NewModelWithCacheAndTheme(cacheMaxSize int, cacheTTL time.Duration, processCache *cache.ProcessCache, filterFile string, selectedTheme theme.Theme) Model {
 	// Initialize with default column headers (will be updated dynamically)
 	columns := []table.Column{
 		{Title: "Process", Width: 19},
@@ -119,9 +119,9 @@ func NewModelWithCacheAndTheme(cacheMaxSize int, cacheTTL time.Duration, process
 		Bold(false)
 	t.SetStyles(s)
 
-	// Initialize text input for whitelist comments
+	// Initialize text input for filter comments
 	ti := textinput.New()
-	ti.Placeholder = "Enter description for whitelist entry..."
+	ti.Placeholder = "Enter description for filter entry..."
 	ti.CharLimit = 100
 	ti.Width = 50
 
@@ -135,8 +135,8 @@ func NewModelWithCacheAndTheme(cacheMaxSize int, cacheTTL time.Duration, process
 		cacheTTL:       cacheTTL,
 		lastCleanup:    time.Now(),
 		processCache:   processCache,
-		whitelistFile:  whitelistFile,
-		whitelistInput: ti,
+		filterFile:  filterFile,
+		filterInput: ti,
 		theme:          selectedTheme,
 	}
 
@@ -177,8 +177,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		// Handle popup-specific keys
 		if m.showPopup {
-			// For whitelist popup, handle text input first if input is focused
-			if m.popupType == popupWhitelist && m.whitelistInput.Focused() {
+			// For filter popup, handle text input first if input is focused
+			if m.popupType == popupFilter && m.filterInput.Focused() {
 				// Handle special keys that should not go to text input
 				switch msg.String() {
 				case "ctrl+c":
@@ -186,46 +186,46 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				case "esc":
 					// Return to connection details popup
 					m.popupType = popupDetails
-					m.whitelistConfirming = false
-					m.whitelistInput.SetValue("")
-					m.whitelistInput.Blur()
+					m.filterConfirming = false
+					m.filterInput.SetValue("")
+					m.filterInput.Blur()
 					return m, nil
 				case "enter":
-					if !m.whitelistConfirming {
-						// First enter - confirm the whitelist entry
-						m.whitelistConfirming = true
+					if !m.filterConfirming {
+						// First enter - confirm the filter entry
+						m.filterConfirming = true
 						return m, nil
 					} else {
-						// Second enter - actually add to whitelist
-						if err := m.addToWhitelist(); err != nil {
+						// Second enter - actually add to filter
+						if err := m.addToFilter(); err != nil {
 							// TODO: Show error message - for now return to details popup
 						}
-						// Return to connection details popup after successful whitelist
+						// Return to connection details popup after successful filter
 						m.popupType = popupDetails
-						m.whitelistConfirming = false
-						m.whitelistInput.SetValue("")
-						m.whitelistInput.Blur()
+						m.filterConfirming = false
+						m.filterInput.SetValue("")
+						m.filterInput.Blur()
 						return m, nil
 					}
 				default:
 					// All other keys (including 'q') go to text input
-					m.whitelistInput, cmd = m.whitelistInput.Update(msg)
+					m.filterInput, cmd = m.filterInput.Update(msg)
 					return m, cmd
 				}
 			}
 
-			// Handle keys for other popup types or when whitelist input is not focused
+			// Handle keys for other popup types or when filter input is not focused
 			switch msg.String() {
 			case "ctrl+c":
 				return m, tea.Quit
 
 			case "q", "esc":
-				if m.popupType == popupWhitelist {
-					// Return to connection details popup from whitelist popup
+				if m.popupType == popupFilter {
+					// Return to connection details popup from filter popup
 					m.popupType = popupDetails
-					m.whitelistConfirming = false
-					m.whitelistInput.SetValue("")
-					m.whitelistInput.Blur()
+					m.filterConfirming = false
+					m.filterInput.SetValue("")
+					m.filterInput.Blur()
 				} else {
 					// Close popup entirely
 					m.showPopup = false
@@ -233,12 +233,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 
-			case "w":
-				if m.popupType == popupDetails && m.whitelistFile != "" {
-					// Open whitelist popup from details popup
+			case "f":
+				if m.popupType == popupDetails && m.filterFile != "" {
+					// Open filter popup from details popup
 					if m.popupData != nil && m.popupData.Event.ProcessSHA256 != "" {
-						m.popupType = popupWhitelist
-						m.whitelistInput.Focus()
+						m.popupType = popupFilter
+						m.filterInput.Focus()
 					}
 					return m, nil
 				}
@@ -325,8 +325,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *Model) View() string {
 	if m.showPopup && m.popupData != nil {
-		if m.popupType == popupWhitelist {
-			return m.renderWhitelistPopup()
+		if m.popupType == popupFilter {
+			return m.renderFilterPopup()
 		}
 		return m.renderDetailsPopup()
 	}
@@ -580,8 +580,8 @@ func (m *Model) renderDetailsPopup() string {
 		Background(m.theme.PopupBackground).
 		Align(lipgloss.Center)
 	
-	if m.whitelistFile != "" && data.Event.ProcessSHA256 != "" {
-		content.WriteString(helpStyle.Render("Press [W] to whitelist process  •  [ESC] to close"))
+	if m.filterFile != "" && data.Event.ProcessSHA256 != "" {
+		content.WriteString(helpStyle.Render("Press [f] to filter process  •  [ESC] to close"))
 	} else {
 		content.WriteString(helpStyle.Render("Press [ESC] to close"))
 	}
@@ -610,7 +610,7 @@ func (m *Model) renderDetailsPopup() string {
 	return lipgloss.Place(terminalWidth, terminalHeight, lipgloss.Center, lipgloss.Center, popup)
 }
 
-func (m *Model) renderWhitelistPopup() string {
+func (m *Model) renderFilterPopup() string {
 	if m.popupData == nil {
 		return ""
 	}
@@ -620,10 +620,10 @@ func (m *Model) renderWhitelistPopup() string {
 
 	// Title
 	titleStyle := lipgloss.NewStyle().
-		Foreground(m.theme.WhitelistPopupBorder).
+		Foreground(m.theme.FilterPopupBorder).
 		Background(m.theme.PopupBackground).
 		Bold(true)
-	content.WriteString(titleStyle.Render("Add to Whitelist"))
+	content.WriteString(titleStyle.Render("Add to Filter"))
 	content.WriteString("\n\n")
 
 	// Show process information
@@ -651,7 +651,7 @@ func (m *Model) renderWhitelistPopup() string {
 	// Description input
 	content.WriteString(labelStyle.Render("Description: "))
 	content.WriteString("\n")
-	content.WriteString(m.whitelistInput.View())
+	content.WriteString(m.filterInput.View())
 	content.WriteString("\n\n")
 
 	// Instructions
@@ -660,16 +660,16 @@ func (m *Model) renderWhitelistPopup() string {
 		Background(m.theme.PopupBackground).
 		Italic(true)
 
-	if !m.whitelistConfirming {
+	if !m.filterConfirming {
 		content.WriteString(helpStyle.Render("Enter a description, then press ENTER to confirm"))
 	} else {
-		content.WriteString(helpStyle.Render("Press ENTER again to add to whitelist, or ESC to cancel"))
+		content.WriteString(helpStyle.Render("Press ENTER again to add to filter, or ESC to cancel"))
 	}
 
 	// Style the popup
 	popupStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(m.theme.WhitelistPopupBorder).
+		BorderForeground(m.theme.FilterPopupBorder).
 		Background(m.theme.PopupBackground).
 		Padding(1, 2)
 
@@ -689,13 +689,13 @@ func (m *Model) renderWhitelistPopup() string {
 	return lipgloss.Place(terminalWidth, terminalHeight, lipgloss.Center, lipgloss.Center, popup)
 }
 
-func (m *Model) addToWhitelist() error {
-	if m.popupData == nil || m.whitelistFile == "" {
-		return fmt.Errorf("no whitelist file configured")
+func (m *Model) addToFilter() error {
+	if m.popupData == nil || m.filterFile == "" {
+		return fmt.Errorf("no filter file configured")
 	}
 
 	data := m.popupData
-	description := strings.TrimSpace(m.whitelistInput.Value())
+	description := strings.TrimSpace(m.filterInput.Value())
 	if description == "" {
 		description = "Added from TUI"
 	}
@@ -709,20 +709,20 @@ func (m *Model) addToWhitelist() error {
 	entry.WriteString(fmt.Sprintf("# Added: %s\n", time.Now().Format("2006-01-02 15:04:05")))
 	entry.WriteString(fmt.Sprintf("%s\n", data.Event.ProcessSHA256))
 
-	// Append to whitelist file
-	file, err := os.OpenFile(m.whitelistFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	// Append to filter file
+	file, err := os.OpenFile(m.filterFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
-		return fmt.Errorf("failed to open whitelist file: %w", err)
+		return fmt.Errorf("failed to open filter file: %w", err)
 	}
 	defer file.Close()
 
 	if _, err := file.WriteString(entry.String()); err != nil {
-		return fmt.Errorf("failed to write to whitelist file: %w", err)
+		return fmt.Errorf("failed to write to filter file: %w", err)
 	}
 
-	// Update the process cache's whitelist filter
+	// Update the process cache's process filter
 	if m.processCache != nil {
-		if err := m.processCache.GetWhitelistFilter().AddHash(data.Event.ProcessSHA256); err != nil {
+		if err := m.processCache.GetProcessFilter().AddHash(data.Event.ProcessSHA256); err != nil {
 			return fmt.Errorf("failed to add hash to filter: %w", err)
 		}
 	}

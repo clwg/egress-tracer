@@ -20,7 +20,7 @@ type Theme struct {
 	
 	// Popup colors
 	DetailsPopupBorder   lipgloss.Color
-	WhitelistPopupBorder lipgloss.Color
+	FilterPopupBorder lipgloss.Color
 	PopupLabelForeground lipgloss.Color
 	PopupValueForeground lipgloss.Color
 	PopupBackground      lipgloss.Color
@@ -51,7 +51,7 @@ var (
 		
 		// Popups
 		DetailsPopupBorder:     lipgloss.Color("86"),
-		WhitelistPopupBorder:   lipgloss.Color("212"),
+		FilterPopupBorder:   lipgloss.Color("212"),
 		PopupLabelForeground:   lipgloss.Color("86"),
 		PopupValueForeground:   lipgloss.Color("255"),
 		PopupBackground:        lipgloss.Color(""),
@@ -81,7 +81,7 @@ var (
 		
 		// Popups
 		DetailsPopupBorder:     lipgloss.Color("22"),
-		WhitelistPopupBorder:   lipgloss.Color("161"),
+		FilterPopupBorder:   lipgloss.Color("161"),
 		PopupLabelForeground:   lipgloss.Color("22"),
 		PopupValueForeground:   lipgloss.Color("235"),
 		PopupBackground:        lipgloss.Color("255"),
@@ -111,7 +111,7 @@ var (
 		
 		// Popups
 		DetailsPopupBorder:     lipgloss.Color("255"),
-		WhitelistPopupBorder:   lipgloss.Color("255"),
+		FilterPopupBorder:   lipgloss.Color("255"),
 		PopupLabelForeground:   lipgloss.Color("255"),
 		PopupValueForeground:   lipgloss.Color("247"),
 		PopupBackground:        lipgloss.Color("0"),
@@ -141,7 +141,7 @@ var (
 		
 		// Popups
 		DetailsPopupBorder:     lipgloss.Color("12"),
-		WhitelistPopupBorder:   lipgloss.Color("5"),
+		FilterPopupBorder:   lipgloss.Color("5"),
 		PopupLabelForeground:   lipgloss.Color("12"),
 		PopupValueForeground:   lipgloss.Color("255"),
 		PopupBackground:        lipgloss.Color("18"),
@@ -171,7 +171,7 @@ var (
 		
 		// Popups
 		DetailsPopupBorder:     lipgloss.Color("82"),  // Bright green
-		WhitelistPopupBorder:   lipgloss.Color("165"), // Magenta
+		FilterPopupBorder:   lipgloss.Color("165"), // Magenta
 		PopupLabelForeground:   lipgloss.Color("220"), // Gold
 		PopupValueForeground:   lipgloss.Color("87"),  // Light green
 		PopupBackground:        lipgloss.Color("17"),  // Dark blue
