@@ -184,9 +184,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				case "ctrl+c":
 					return m, tea.Quit
 				case "esc":
-					m.showPopup = false
+					// Return to connection details popup
 					m.popupType = popupDetails
-					m.popupData = nil
 					m.whitelistConfirming = false
 					m.whitelistInput.SetValue("")
 					m.whitelistInput.Blur()
@@ -199,13 +198,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					} else {
 						// Second enter - actually add to whitelist
 						if err := m.addToWhitelist(); err != nil {
-							// TODO: Show error message - for now just close popup
+							// TODO: Show error message - for now return to details popup
 						}
-						m.showPopup = false
+						// Return to connection details popup after successful whitelist
 						m.popupType = popupDetails
-						m.popupData = nil
 						m.whitelistConfirming = false
 						m.whitelistInput.SetValue("")
+						m.whitelistInput.Blur()
 						return m, nil
 					}
 				default:
@@ -221,13 +220,28 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 
 			case "q", "esc":
-				m.showPopup = false
-				m.popupType = popupDetails
-				m.popupData = nil
-				m.whitelistConfirming = false
-				m.whitelistInput.SetValue("")
-				m.whitelistInput.Blur()
+				if m.popupType == popupWhitelist {
+					// Return to connection details popup from whitelist popup
+					m.popupType = popupDetails
+					m.whitelistConfirming = false
+					m.whitelistInput.SetValue("")
+					m.whitelistInput.Blur()
+				} else {
+					// Close popup entirely
+					m.showPopup = false
+					m.popupData = nil
+				}
 				return m, nil
+
+			case "w":
+				if m.popupType == popupDetails && m.whitelistFile != "" {
+					// Open whitelist popup from details popup
+					if m.popupData != nil && m.popupData.Event.ProcessSHA256 != "" {
+						m.popupType = popupWhitelist
+						m.whitelistInput.Focus()
+					}
+					return m, nil
+				}
 
 			case "enter":
 				if m.popupType == popupDetails {
@@ -252,18 +266,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.popupData = m.getSelectedConnection()
 			return m, nil
 
-		case "w":
-			if m.whitelistFile != "" {
-				// Open whitelist popup for selected connection (only if whitelist is configured)
-				selectedData := m.getSelectedConnection()
-				if selectedData != nil && selectedData.Event.ProcessSHA256 != "" {
-					m.showPopup = true
-					m.popupType = popupWhitelist
-					m.popupData = selectedData
-					m.whitelistInput.Focus()
-				}
-			}
-			return m, nil
 
 		case "1":
 			m.sortBy = sortByProcess
@@ -353,12 +355,7 @@ func (m *Model) View() string {
 		Foreground(m.theme.HelpForeground).
 		Padding(0, 1)
 
-	var helpText string
-	if m.whitelistFile != "" {
-		helpText = "Keys: 1-8 sort columns | enter details | w whitelist process | r reset | q quit"
-	} else {
-		helpText = "Keys: 1-8 sort columns | enter details | r reset | q quit"
-	}
+	helpText := "Keys: 1-8 sort columns | enter details | r reset | q quit"
 	help := helpStyle.Render(helpText)
 	b.WriteString(help + "\n\n")
 
@@ -570,7 +567,14 @@ func (m *Model) renderDetailsPopup() string {
 		Foreground(m.theme.HelpForeground).
 		Background(m.theme.PopupBackground).
 		Italic(true)
-	content.WriteString(helpStyle.Render("Press ESC to close"))
+	
+	var helpText string
+	if m.whitelistFile != "" && data.Event.ProcessSHA256 != "" {
+		helpText = "Press W to whitelist process | ESC to close"
+	} else {
+		helpText = "Press ESC to close"
+	}
+	content.WriteString(helpStyle.Render(helpText))
 
 	// Style the popup
 	popupStyle := lipgloss.NewStyle().
