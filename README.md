@@ -2,6 +2,9 @@
 
 A lightweight eBPF-based network connection tracer that monitors outbound TCP and UDP connections in real-time with process context and caching.
 
+<img src="images/main.png" alt="details screen" width="100%">
+<img src="images/details.png" alt="details screen" width="25%">
+
 
 ### Quickstart (Ubuntu 24.04)
 
